@@ -12,7 +12,7 @@ You will need all these tools installed and available in the path.
 - MSMC-TOOLS
 - R</pre></code>
 
-**Add mod_dec.pl, decode2bed.pl and psmc_plot.pl file to the path and make sure it is available globally on the PC. 
+<pre><code>**Add mod_dec.pl, decode2bed.pl and psmc_plot.pl file to the path and make sure it is available globally on the PC.</pre></code>
   
 <h2>Step 1: Repeat Identification and creating input for repeat analysis. </h2>
 
