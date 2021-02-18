@@ -4,13 +4,13 @@
 <h2> Third party tools required- </h2>
 You will need all these tools installed and available in the path.
 <n>SAMTOOLS<n/>
-BCFTOOLS
-BEDTOOLS
-PSMC
-SEQTK
-MSMC 
-MSMC-TOOLS
-R
+- BCFTOOLS
+- BEDTOOLS
+- PSMC
+- SEQTK
+- MSMC 
+- MSMC-TOOLS
+- R
 
   
 <h2>Step 1: Repeat Identification and creating input for repeat analysis. </h2>
