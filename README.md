@@ -1,5 +1,5 @@
 # CoalRep
-<h1> Evaluation of impact of repetitive elements during coalescent demographic inferences. </h1>
+<h1> Evaluating the impact of repetitive elements during coalescent demographic inferences. </h1>
 
 <h2>Step 1: Repeat Identification and creating input for repeat analysis. </h2>
 
