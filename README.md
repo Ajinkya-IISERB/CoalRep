@@ -1,5 +1,5 @@
 # CoalRep
-<h1> Evaluating the impact of repetitive elements during coalescent demographic inferences. </h1>
+<h1> Evaluating the impact of repetitive elements on coalescent demographic inferences. </h1>
 
 <h2> Third party tools required- </h2>
 You will need all these tools installed and available in the path.
