@@ -1,0 +1,1195 @@
+#!/bin/bash
+helpFunction()
+{
+   echo ""
+   echo "Usage: coalrep -g genome -b bamfile -p prefix -n threads -m repeatbed -P Atomic Intervals for PSMC -t Generation time for the organism -u Mutation rate for the organism"
+   echo -e "\t-g Genome fasta file"
+   echo -e "\t-b sorted bam file"
+   echo -e "\t-p output prefix"
+   echo -e "\t-n Number of threads to use"
+   echo -e "\t-m Bed file of repeat co-ordinates and classes"
+   echo -e "\t-P Pattern of atomic intervals used for PSMC"
+   echo -e "\t-t Generation time of organism"
+   echo -e "\t-u Mutation rate of organism (per generation per site)"
+exit 1
+}
+while getopts ":g:b:p:n:m:P:t:u:" opt
+do
+case "$opt" in
+g ) fasta="$OPTARG" ;;
+b ) bamfile="$OPTARG" ;;
+p ) prefix="$OPTARG" ;;
+n ) threads="$OPTARG" ;;
+m ) repeatbed="$OPTARG" ;;
+P ) atomic="$OPTARG" ;;
+t ) Time="$OPTARG" ;;
+u ) mutr="$OPTARG" ;;
+? ) helpFunction ;;
+esac
+done
+##Mandatory arguments
+if [[ -z "$fasta" ]] || [[ -z "$bamfile" ]] || [[ -z "$prefix" ]] || [[ -z "$repeatbed" ]]
+then
+ echo "Please provide all input options";
+ echo $fasta
+ echo $bamfile
+ echo $prefix
+ echo $repeatbed
+ helpFunction
+fi
+##Optional arguments
+defn="1"
+defp="4+25*2+4+6"
+defg="15"
+defu="3.75e-08"
+if [ -z "$threads" ]
+then
+echo "Using default value of $defn for it."
+threads=$defn
+fi
+if [ -z "$atomic" ]
+then
+echo "Warning: Input parameter for Atomic interval pattern not defined. Assuming default value of $defp for it."
+atomic=$defp
+fi
+if [ -z "$Time" ]
+then
+echo "Warning: Input parameter generation time not defined. Assuming default value of $defg for it."
+Time=$defg
+fi
+if [ -z "$mutr" ]
+then
+echo "Warning: Input parameter per generation per site mutation rate not defined. Assuming default value of $defu for it."
+mutr=$defu
+fi
+mkdir $prefix
+mkdir $prefix/repclass
+gen_size=`grep -v "^>" $fasta | wc -c`
+echo "Approximate genome size is $gen_size"
+bname=`echo $bamfile | sed 's/.sort.bam//g' | sed 's/.bam//g'`
+ind=`echo "${bname##*/}"`
+perl -pe '/^[^>]/ and $_=uc' $fasta > $prefix/$prefix.un
+samtools faidx $prefix/$prefix.un
+cut -f 1-2 $prefix/$prefix.un.fai | sort -k1,1 -k2n,2 > $prefix/$prefix.un.genome
+cat $repeatbed | awk '{print $1,$2,$3}' | sed 's/ /\t/g' > $prefix/$prefix.mask.pos
+sed -i '1d' $prefix/$prefix.mask.pos
+sort -k1,1 -k2n,2 $prefix/$prefix.mask.pos > $prefix/$prefix.mask.pos.tmp
+bedtools complement -i $prefix/$prefix.mask.pos.tmp -g $prefix/$prefix.un.genome | awk '{print $0, "Non_repeat"}' | sed 's/ /\t/g' >  $prefix/repclass/$prefix.nonrep.pos
+cat $repeatbed | awk '{print $1,$2,$3,$4}' | sed 's/ /\t/g' | sed 's/\//_/g'| sed 's/\?//g' > $prefix/$prefix.repclass
+sed -i '1d' $prefix/$prefix.repclass
+cat $prefix/$prefix.repclass $prefix/repclass/$prefix.nonrep.pos | sort -k1n,1 -k2n,2 | sed 's/ /\t/g' > $prefix/repclass/$prefix.repclass
+bedtools maskfasta -fi $prefix/$prefix.un -bed $prefix/$prefix.mask.pos -fo $prefix/$prefix.hm
+samtools faidx $prefix/$prefix.hm
+echo "Now, calculating coverage"
+samtools depth --reference $prefix/$prefix.un $bamfile > $prefix/$ind.$prefix.coverage
+awk '{sum += $3} END {print sum / NR}' $prefix/$ind.$prefix.coverage > $prefix/$ind.$prefix.meancov
+meancov=`cat $prefix/$ind.$prefix.meancov`
+echo "The mean coverage of reads is $meancov"
+d=`cat $prefix/$ind.$prefix.meancov|awk '{print $0/3}'`
+D=`cat $prefix/$ind.$prefix.meancov|awk '{print $0*2}'`
+echo "The variants will be called now"
+samtools mpileup -Q20 -q20 -C50 -uf $prefix/$prefix.un $bamfile | bcftools call --threads $threads -c - | vcfutils.pl vcf2fq -Q 25 -d $d -D $D | gzip > $prefix/$ind.$prefix.un.fq.gz
+samtools mpileup -Q20 -q20 -C50 -uf $prefix/$prefix.hm $bamfile | bcftools call --threads $threads -c - | vcfutils.pl vcf2fq -Q 25 -d $d -D $D | gzip > $prefix/$ind.$prefix.hm.fq.gz
+echo "Variants are ready"
+mkdir $prefix/s20
+mkdir $prefix/s50
+mkdir $prefix/s100
+mkdir $prefix/msmc
+echo "Making PSMC fasta from variants"
+fq2psmcfa $prefix/$ind.$prefix.un.fq.gz > $prefix/s100/$ind.$prefix.un.s100.psmcfa
+fq2psmcfa -s20 $prefix/$ind.$prefix.un.fq.gz > $prefix/s20/$ind.$prefix.un.s20.psmcfa
+fq2psmcfa -s50 $prefix/$ind.$prefix.un.fq.gz > $prefix/s50/$ind.$prefix.un.s50.psmcfa
+fq2psmcfa $prefix/$ind.$prefix.hm.fq.gz > $prefix/s100/$ind.$prefix.hm.s100.psmcfa
+fq2psmcfa -s20 $prefix/$ind.$prefix.hm.fq.gz > $prefix/s20/$ind.$prefix.hm.s20.psmcfa
+fq2psmcfa -s50 $prefix/$ind.$prefix.hm.fq.gz > $prefix/s50/$ind.$prefix.hm.s50.psmcfa
+echo "Creating heterozygosity profile"
+seqtk listhet $prefix/$ind.$prefix.hm.fq.gz | awk '{print $1,$2,$2,$3}' | sed 's/ /\t/g' > $prefix/$ind.$prefix.hm.hetlist
+seqtk listhet $prefix/$ind.$prefix.un.fq.gz | awk '{print $1,$2,$2,$3}' | sed 's/ /\t/g'> $prefix/$ind.$prefix.un.hetlist
+echo "Now, running PSMC"
+psmc -d -N25 -t5 -r5 -p $atomic -o $prefix/s100/$ind.$prefix.un.s100.psmc $prefix/s100/$ind.$prefix.un.s100.psmcfa
+psmc -d -N25 -t5 -r5 -p $atomic -o $prefix/s20/$ind.$prefix.un.s20.psmc $prefix/s20/$ind.$prefix.un.s20.psmcfa
+psmc -d -N25 -t5 -r5 -p $atomic -o $prefix/s50/$ind.$prefix.un.s50.psmc $prefix/s50/$ind.$prefix.un.s50.psmcfa
+psmc -d -N25 -t5 -r5 -p $atomic -o $prefix/s100/$ind.$prefix.hm.s100.psmc $prefix/s100/$ind.$prefix.hm.s100.psmcfa
+psmc -d -N25 -t5 -r5 -p $atomic -o $prefix/s20/$ind.$prefix.hm.s20.psmc $prefix/s20/$ind.$prefix.hm.s20.psmcfa
+psmc -d -N25 -t5 -r5 -p $atomic -o $prefix/s50/$ind.$prefix.hm.s50.psmc $prefix/s50/$ind.$prefix.hm.s50.psmcfa
+echo "PSMC output is done"
+echo "Now, creating plotting information"
+psmc_plot.pl -R -u $mutr -g $Time $prefix/s100/$ind.$prefix.un.s100 $prefix/s100/$ind.$prefix.un.s100.psmc
+psmc_plot.pl -R -u $mutr -g $Time $prefix/s100/$ind.$prefix.hm.s100 $prefix/s100/$ind.$prefix.hm.s100.psmc
+psmc_plot.pl -s20 -R -u $mutr -g $Time $prefix/s20/$ind.$prefix.un.s20 $prefix/s20/$ind.$prefix.un.s20.psmc
+psmc_plot.pl -s20 -R -u $mutr -g $Time $prefix/s20/$ind.$prefix.hm.s20 $prefix/s20/$ind.$prefix.hm.s20.psmc
+psmc_plot.pl -s50 -R -u $mutr -g $Time $prefix/s50/$ind.$prefix.un.s50 $prefix/s50/$ind.$prefix.un.s50.psmc
+psmc_plot.pl -s50 -R -u $mutr -g $Time $prefix/s50/$ind.$prefix.hm.s50 $prefix/s50/$ind.$prefix.hm.s50.psmc
+cut -f1 $prefix/$prefix.un.fai > $prefix/$prefix.un.scaf.list
+cd $prefix
+echo "Now, running MSMC analysis"
+while read scaffold
+do
+samtools mpileup -q20 -Q20 -C50 -u -r $scaffold -f $prefix.un ../$bamfile | bcftools call -c -V indels | bamCaller.py $meancov msmc/$scaffold.un.mask.bed.gz | gzip -c > msmc/$scaffold.un.vcf.gz
+samtools mpileup -q20 -Q20 -C50 -u -r $scaffold -f $prefix.hm ../$bamfile | bcftools call -c -V indels | bamCaller.py $meancov msmc/$scaffold.hm.mask.bed.gz | gzip -c > msmc/$scaffold.hm.vcf.gz
+generate_multihetsep.py --mask=msmc/$scaffold.un.mask.bed.gz msmc/$scaffold.un.vcf.gz > msmc/$scaffold.un.mask.bed.txt
+generate_multihetsep.py --mask=msmc/$scaffold.hm.mask.bed.gz msmc/$scaffold.hm.vcf.gz > msmc/$scaffold.hm.mask.bed.txt
+done < $prefix.un.scaf.list
+find msmc/ -size 0 -delete
+msmc -o msmc/$ind.$prefix.un msmc/*.un.mask.bed.txt
+msmc -o msmc/$ind.$prefix.hm msmc/*.hm.mask.bed.txt
+cd s20
+echo "Now, analysing decoded atomic intervals and repeat profiling"
+rd20=`awk '$2==20 {print $1,$2,NR}' $ind.$prefix.hm.s20.psmc | grep "RD" | awk '{print $3}'`
+rd21=`awk '$2==21 {print $1,$2,NR}' $ind.$prefix.un.s20.psmc | grep "RD" | awk '{print $3}'`
+awk -v a="$rd20" -v b="$rd21" 'NR==a, NR==b' $ind.$prefix.hm.s20.psmc | grep "RS" | awk '{print $2,$5}' | sed 's/ /\t/g' > $ind.$prefix.hm.s20.RE
+awk -v a="$rd20" -v b="$rd21" 'NR==a, NR==b' $ind.$prefix.un.s20.psmc | grep "RS" | awk '{print $2,$5}' | sed 's/ /\t/g' > $ind.$prefix.un.s20.RE
+mod_dec.pl -s20 $ind.$prefix.hm.s20.psmc | awk '{ print >$4".hm"}'
+mod_dec.pl -s20 $ind.$prefix.hm.s20.psmc | awk '{print $4,$3-$2}' > $ind.$prefix.hm.s20.int.lengths
+mod_dec.pl -s20 $ind.$prefix.un.s20.psmc | awk '{ print >$4".un"}'
+mod_dec.pl -s20 $ind.$prefix.un.s20.psmc | awk '{print $4,$3-$2}' > $ind.$prefix.un.s20.int.lengths
+ni=`awk '{print $1}' $ind.$prefix.un.s20.RE|tail -1`
+for a in *.psmc
+do
+b=`echo $a | sed 's/.psmc//g'`
+cat $a | grep "^RS" | awk '{print $5}' > $b.nrec
+done
+if [ -f "$ind.$prefix.un.rep_int.txt" ]
+then
+rm $ind.$prefix.un.rep_int.txt
+fi
+for (( c=0; c<=$ni; c++ ))
+do
+x="$c".un
+if [ -f "${x}" ]
+then
+awk '{print $1,$2,$3}' ${x} | sed 's/ /\t/g' > ${x}.bed
+bedtools intersect -wao -a ${x}.bed -b ../$prefix.mask.pos | sed 's/ /\t/g' > ${x}.txt
+total=`cat ${x} | awk '{sum += ($3-$2)} END {print sum}'`
+rep=`cat ${x}.txt | awk '{sum += $7} END {print sum}'`
+percent=`echo $rep $total|awk '{ print ($1/$2)*100 }'`
+echo ${x} $total $rep $percent | sed 's/ /\t/g' >> $ind.$prefix.un.rep_int.txt
+else
+echo "${x} 0 0 0"|cat|sed 's/ /\t/g' >>  $ind.$prefix.un.rep_int.txt
+fi
+done
+sed '1i Atomic_Interval\tTOTAL_Length_of_Interval\tRepeat_Length\tPercent of repeats' $ind.$prefix.un.rep_int.txt > $ind.$prefix.un.rep_int.txt.head
+if [ -f "$ind.$prefix.hm.rep_int.txt" ]
+then
+rm $ind.$prefix.hm.rep_int.txt
+fi
+for (( c=0; c<=$ni; c++ ))
+do
+x="$c".hm
+if [ -f "${x}" ]
+then
+awk '{print $1,$2,$3}' ${x}| sed 's/ /\t/g' > ${x}.bed
+bedtools intersect -wao -a ${x}.bed -b ../$prefix.mask.pos | sed 's/ /\t/g' > ${x}.txt
+total=`cat ${x} | awk '{sum += ($3-$2)} END {print sum}'`
+rep=`cat ${x}.txt | awk '{sum += $7} END {print sum}'`
+percent=`echo $rep $total|awk '{ print ($1/$2)*100 }'`
+echo ${x} $total $rep $percent | sed 's/ /\t/g' >> $ind.$prefix.hm.rep_int.txt
+else
+echo "${x} 0 0 0"|cat|sed 's/ /\t/g' >>  $ind.$prefix.hm.rep_int.txt
+fi
+done
+sed '1i Atomic_Interval\tTOTAL_Length_of_Interval\tRepeat_Length\tPercent of repeats' $ind.$prefix.hm.rep_int.txt > $ind.$prefix.hm.rep_int.txt.head
+for (( c=0; c<=$ni; c++ ))
+do
+x="$c".un.bed
+if [ -f "${x}" ]
+then
+bedtools intersect -wao -a ${x} -b ../$ind.$prefix.un.hetlist > $x.hetlist
+fi
+done
+for (( c=0; c<=$ni; c++ ))
+do
+x="$c".hm.bed
+if [ -f "${x}" ]
+then
+bedtools intersect -wao -a ${x} -b ../$ind.$prefix.hm.hetlist > $x.hetlist
+fi
+done
+find ./*.bed.hetlist -size 0 -delete
+if [ -f "$ind.$prefix.un.hetcount" ]
+then
+rm $ind.$prefix.un.hetcount
+fi
+for x in `cat $ind.$prefix.un.rep_int.txt | sed 's/\t/_/g'`
+do
+y=`echo $x|cut -f 1 -d '_'`
+if [ -f "$y".bed.hetlist ]
+then
+totcount=`cat "$y".bed.hetlist | awk '{ if ( $7 != "." ) { print $0; } }' | wc -l`
+kcount=`cat "$y".bed.hetlist | awk '($7 == "K" || $7 == "k"){print $0}' | wc -l`
+mcount=`cat "$y".bed.hetlist | awk '($7 == "M" || $7 == "m"){print $0}' | wc -l`
+rcount=`cat "$y".bed.hetlist | awk '($7 == "R" || $7 == "r"){print $0}' | wc -l`
+scount=`cat "$y".bed.hetlist | awk '($7 == "S" || $7 == "s"){print $0}' | wc -l`
+wcount=`cat "$y".bed.hetlist | awk '($7 == "W" || $7 == "w"){print $0}' | wc -l`
+ycount=`cat "$y".bed.hetlist | awk '($7 == "Y" || $7 == "y"){print $0}' | wc -l`
+echo $x $totcount $kcount $mcount $rcount $scount $wcount $ycount | sed 's/_/\t/g' | awk '{print $1,$2,$3,$4,$5/$2,$6/$2,$7/$2,$8/$2,$9/$2,$10/$2,$11/$2}' >> $ind.$prefix.un.hetcount
+else
+echo $x 0 0 0 0 0 0 0|sed 's/_/\t/g' >> $ind.$prefix.un.hetcount
+fi
+done
+sed '1i Atomic_Interval\tTotal_Length_of_Interval\tRepeat_Length\tPercent_of_repeats\tFraction_of_K\tFraction_of_M\tFraction_of_R\tFraction_of_S\tFraction_of_W\tFraction_of_Y' $ind.$prefix.un.hetcount > $ind.$prefix.un.hetcount.head
+if [ -f "$ind.$prefix.hm.hetcount" ]
+then
+rm $ind.$prefix.hm.hetcount
+fi
+for x in `cat $ind.$prefix.hm.rep_int.txt|sed 's/\t/_/g'`
+do
+y=`echo $x|cut -f 1 -d '_'`
+if [ -f "$y".bed.hetlist ]
+then
+totcount=`cat "$y".bed.hetlist | awk '{ if ( $7 != "." ) { print $0; } }'|wc -l`
+kcount=`cat "$y".bed.hetlist | awk '($7 == "K" || $7 == "k"){print $0}'|wc -l`
+count=`cat "$y".bed.hetlist |awk '($7 == "M" || $7 == "m"){print $0}'|wc -l`
+rcount=`cat "$y".bed.hetlist |awk '($7 == "R" || $7 == "r"){print $0}'|wc -l`
+scount=`cat "$y".bed.hetlist |awk '($7 == "S" || $7 == "s"){print $0}'|wc -l`
+wcount=`cat "$y".bed.hetlist |awk '($7 == "W" || $7 == "w"){print $0}'|wc -l`
+ycount=`cat "$y".bed.hetlist |awk '($7 == "Y" || $7 == "y"){print $0}'|wc -l`
+echo $x $totcount $kcount $mcount $rcount $scount $wcount $ycount|sed 's/_/\t/g'|awk '{print $1,$2,$3,$4,$5/$2,$6/$2,$7/$2,$8/$2,$9/$2,$10/$2,$11/$2}' >> $ind.$prefix.hm.hetcount
+else
+echo $x 0 0 0 0 0 0 0|sed 's/_/\t/g' >> $ind.$prefix.hm.hetcount
+fi
+done
+sed '1i Atomic_Interval\tTotal_Length_of_Interval\tRepeat_Length\tPercent_of_repeats\tFraction_of_K\tFraction_of_M\tFraction_of_R\tFraction_of_S\tFraction_of_W\tFraction_of_Y' $ind.$prefix.un.hetcount > $ind.$prefix.un.hetcount.head
+cut -f4 ../repclass/$prefix.repclass | sort | uniq -c | awk '{print $2}' > $ind.$prefix.rep_class.txt
+for x in *.un.bed
+do
+y=`echo $x | sed 's/.un.bed//g'`
+bedtools subtract -a $x -b ../repclass/$prefix.repclass | bedtools subtract -a $x -b stdin | bedtools intersect -a stdin -b ../repclass/$prefix.repclass -wb | awk '{print $1,$2,$3,$7}' | grep -v "ARTEFACT" | sed 's/ /\t/g' > $y.rc.bed
+bedtools intersect -a $y.rc.bed -b ../$ind.$prefix.un.hetlist -wb > $y.rc.hetcount
+done
+if [ -f "$ind.$prefix.rep.profile" ]
+then
+rm $ind.$prefix.rep.profile
+fi
+for x in *.rc.hetcount
+do
+y=`echo $x | sed 's/.rc.hetcount//g'`
+while read p
+do
+rcbed=`echo $x | sed 's/.rc.hetcount/.rc.bed/g'`
+regionlen=`cat $rcbed|awk -v rc=$p '$4==rc {print $0}'|awk '{print $3-$2}'|awk '{s += $1}END{print s}'`
+totcount=`awk -v rc=$p '{ if ( $4 == rc ){ print $0; } }' $x | wc -l`
+ycount=`awk -v rc=$p '{ if ( $4 == rc && ($8 == "Y" || $8 == "y")){print $0}}' $x | wc -l`
+rcount=`awk -v rc=$p '{ if ( $4 == rc && ($8 == "R" || $8 == "r")){print $0}}' $x | wc -l`
+wcount=`awk -v rc=$p '{ if ( $4 == rc && ($8 == "W" || $8 == "w")){print $0}}' $x | wc -l`
+scount=`awk -v rc=$p '{ if ( $4 == rc && ($8 == "S" || $8 == "s")){print $0}}' $x | wc -l`
+kcount=`awk -v rc=$p '{ if ( $4 == rc && ($8 == "K" || $8 == "k")){print $0}}' $x | wc -l`
+mcount=`awk -v rc=$p '{ if ( $4 == rc && ($8 == "M" || $8 == "m")){print $0}}' $x | wc -l`
+Ts_count=`echo $ycount $rcount | awk '{print $1 + $2}'`
+Tv_count=`echo $wcount $scount $kcount $mcount | awk '{print $1+$2+$3+$4}'`
+Ts_Tv=`echo $Ts_count $Tv_count | awk '{if($2 !=0){print $1/$2} else if($2==0){print "NA"}}'`
+hetpercent=`echo $totcount $regionlen | awk '{if($1 !=0){print ($1/$2)*100} else if($1==0){print "NA"}}'`
+echo $y $p $regionlen $totcount $kcount $mcount $rcount $scount $wcount $ycount $Ts_count $Tv_count $Ts_Tv $hetpercent | awk '{if ( $4 != "0" ) { print $0; } }' | sed 's/ /\t/g' | grep -v "ARTEFACT" >> $ind.$prefix.rep.profile
+done < $ind.$prefix.rep_class.txt
+done
+sed '1i Atomic_Interval\tRepeatclass\tRegion_length\tHety_count\tK_count\tM_count\tR_count\tS_count\tW_count\tY_count\tTransitions\tTransversions\tTs/Tv_ratio\tHety_percent' $ind.$prefix.rep.profile > $ind.$prefix.rep.profile.head
+cd ../s50
+echo "Now, analysing decoded atomic intervals and repeat profiling"
+rd20=`awk '$2==20 {print $1,$2,NR}' $ind.$prefix.hm.s50.psmc | grep "RD" | awk '{print $3}'`
+rd21=`awk '$2==21 {print $1,$2,NR}' $ind.$prefix.un.s50.psmc | grep "RD" | awk '{print $3}'`
+awk -v a="$rd20" -v b="$rd21" 'NR==a, NR==b' $ind.$prefix.hm.s50.psmc | grep "RS" | awk '{print $2,$5}' | sed 's/ /\t/g' > $ind.$prefix.hm.s50.RE
+awk -v a="$rd20" -v b="$rd21" 'NR==a, NR==b' $ind.$prefix.un.s50.psmc | grep "RS" | awk '{print $2,$5}' | sed 's/ /\t/g' > $ind.$prefix.un.s50.RE
+mod_dec.pl -s50 $ind.$prefix.hm.s50.psmc | awk '{ print >$4".hm"}'
+mod_dec.pl -s50 $ind.$prefix.hm.s50.psmc | awk '{print $4,$3-$2}' > $ind.$prefix.hm.s50.int.lengths
+mod_dec.pl -s50 $ind.$prefix.un.s50.psmc | awk '{ print >$4".un"}'
+mod_dec.pl -s50 $ind.$prefix.un.s50.psmc | awk '{print $4,$3-$2}' > $ind.$prefix.un.s50.int.lengths
+ni=`awk '{print $1}' $ind.$prefix.un.s50.RE|tail -1`
+for a in *.psmc
+do
+b=`echo $a | sed 's/.psmc//g'`
+cat $a | grep "^RS" | awk '{print $5}' > $b.nrec
+done
+if [ -f "$ind.$prefix.un.rep_int.txt" ]
+then
+rm $ind.$prefix.un.rep_int.txt
+fi
+for (( c=0; c<=$ni; c++ ))
+do
+x="$c".un
+if [ -f "${x}" ]
+then
+awk '{print $1,$2,$3}' ${x}| sed 's/ /\t/g' > ${x}.bed
+bedtools intersect -wao -a ${x}.bed -b ../$prefix.mask.pos | sed 's/ /\t/g' > ${x}.txt
+total=`cat ${x} | awk '{sum += ($3-$2)} END {print sum}'`
+rep=`cat ${x}.txt | awk '{sum += $7} END {print sum}'`
+percent=`echo $rep $total|awk '{ print ($1/$2)*100 }'`
+echo ${x} $total $rep $percent | sed 's/ /\t/g' >> $ind.$prefix.un.rep_int.txt
+else
+echo "${x} 0 0 0"|cat|sed 's/ /\t/g' >>  $ind.$prefix.un.rep_int.txt
+fi
+done
+sed '1i Atomic_Interval\tTOTAL_Length_of_Interval\tRepeat_Length\tPercent of repeats' $ind.$prefix.un.rep_int.txt > $ind.$prefix.un.rep_int.txt.head
+if [ -f "$ind.$prefix.hm.rep_int.txt" ]
+then
+rm $ind.$prefix.hm.rep_int.txt
+fi
+for (( c=0; c<=$ni; c++ ))
+do
+x="$c".hm
+if [ -f "${x}" ]
+then
+awk '{print $1,$2,$3}' ${x}| sed 's/ /\t/g' > ${x}.bed
+bedtools intersect -wao -a ${x}.bed -b ../$prefix.mask.pos | sed 's/ /\t/g' > ${x}.txt
+total=`cat ${x} | awk '{sum += ($3-$2)} END {print sum}'`
+rep=`cat ${x}.txt | awk '{sum += $7} END {print sum}'`
+percent=`echo $rep $total|awk '{ print ($1/$2)*100 }'`
+echo ${x} $total $rep $percent | sed 's/ /\t/g' >> $ind.$prefix.hm.rep_int.txt
+else
+echo "${x} 0 0 0"|cat|sed 's/ /\t/g' >>  $ind.$prefix.hm.rep_int.txt
+fi
+done
+sed '1i Atomic_Interval\tTOTAL_Length_of_Interval\tRepeat_Length\tPercent of repeats' $ind.$prefix.hm.rep_int.txt > $ind.$prefix.hm.rep_int.txt.head
+for (( c=0; c<=$ni; c++ ))
+do
+x="$c".un.bed
+if [ -f "${x}" ]
+then
+bedtools intersect -wao -a ${x} -b ../$ind.$prefix.un.hetlist > $x.hetlist
+fi
+done
+for (( c=0; c<=$ni; c++ ))
+do
+x="$c".hm.bed
+if [ -f "${x}" ]
+then
+bedtools intersect -wao -a ${x} -b ../$ind.$prefix.hm.hetlist > $x.hetlist
+fi
+done
+find ./*.bed.hetlist -size 0 -delete
+if [ -f "$ind.$prefix.un.hetcount" ]
+then
+rm $ind.$prefix.un.hetcount
+fi
+for x in `cat $ind.$prefix.un.rep_int.txt | sed 's/\t/_/g'`
+do
+y=`echo $x|cut -f 1 -d '_'`
+if [ -f "$y".bed.hetlist ]
+then
+totcount=`cat "$y".bed.hetlist | awk '{ if ( $7 != "." ) { print $0; } }' | wc -l`
+kcount=`cat "$y".bed.hetlist | awk '($7 == "K" || $7 == "k"){print $0}' | wc -l`
+mcount=`cat "$y".bed.hetlist | awk '($7 == "M" || $7 == "m"){print $0}' | wc -l`
+rcount=`cat "$y".bed.hetlist | awk '($7 == "R" || $7 == "r"){print $0}' | wc -l`
+scount=`cat "$y".bed.hetlist | awk '($7 == "S" || $7 == "s"){print $0}' | wc -l`
+wcount=`cat "$y".bed.hetlist | awk '($7 == "W" || $7 == "w"){print $0}' | wc -l`
+ycount=`cat "$y".bed.hetlist | awk '($7 == "Y" || $7 == "y"){print $0}' | wc -l`
+echo $x $totcount $kcount $mcount $rcount $scount $wcount $ycount | sed 's/_/\t/g' | awk '{print $1,$2,$3,$4,$5/$2,$6/$2,$7/$2,$8/$2,$9/$2,$10/$2,$11/$2}' >> $ind.$prefix.un.hetcount
+else
+echo $x 0 0 0 0 0 0 0|sed 's/_/\t/g' >> $ind.$prefix.un.hetcount
+fi
+done
+sed '1i Atomic_Interval\tTotal_Length_of_Interval\tRepeat_Length\tPercent_of_repeats\tFraction_of_K\tFraction_of_M\tFraction_of_R\tFraction_of_S\tFraction_of_W\tFraction_of_Y' $ind.$prefix.un.hetcount > $ind.$prefix.un.hetcount.head
+if [ -f "$ind.$prefix.hm.hetcount" ]
+then
+rm $ind.$prefix.hm.hetcount
+fi
+for x in `cat $ind.$prefix.hm.rep_int.txt|sed 's/\t/_/g'`
+do
+y=`echo $x|cut -f 1 -d '_'`
+if [ -f "$y".bed.hetlist ]
+then
+totcount=`cat "$y".bed.hetlist | awk '{ if ( $7 != "." ) { print $0; } }'|wc -l`
+kcount=`cat "$y".bed.hetlist | awk '($7 == "K" || $7 == "k"){print $0}'|wc -l`
+count=`cat "$y".bed.hetlist |awk '($7 == "M" || $7 == "m"){print $0}'|wc -l`
+rcount=`cat "$y".bed.hetlist |awk '($7 == "R" || $7 == "r"){print $0}'|wc -l`
+scount=`cat "$y".bed.hetlist |awk '($7 == "S" || $7 == "s"){print $0}'|wc -l`
+wcount=`cat "$y".bed.hetlist |awk '($7 == "W" || $7 == "w"){print $0}'|wc -l`
+ycount=`cat "$y".bed.hetlist |awk '($7 == "Y" || $7 == "y"){print $0}'|wc -l`
+echo $x $totcount $kcount $mcount $rcount $scount $wcount $ycount|sed 's/_/\t/g'|awk '{print $1,$2,$3,$4,$5/$2,$6/$2,$7/$2,$8/$2,$9/$2,$10/$2,$11/$2}' >> $ind.$prefix.hm.hetcount
+else
+echo $x 0 0 0 0 0 0 0|sed 's/_/\t/g' >> $ind.$prefix.hm.hetcount
+fi
+done
+sed '1i Atomic_Interval\tTotal_Length_of_Interval\tRepeat_Length\tPercent_of_repeats\tFraction_of_K\tFraction_of_M\tFraction_of_R\tFraction_of_S\tFraction_of_W\tFraction_of_Y' $ind.$prefix.un.hetcount > $ind.$prefix.un.hetcount.head
+cut -f4 ../repclass/$prefix.repclass | sort | uniq -c | awk '{print $2}' > $ind.$prefix.rep_class.txt
+for x in *.un.bed
+do
+y=`echo $x | sed 's/.un.bed//g'`
+bedtools subtract -a $x -b ../repclass/$prefix.repclass | bedtools subtract -a $x -b stdin | bedtools intersect -a stdin -b ../repclass/$prefix.repclass -wb | awk '{print $1,$2,$3,$7}' | grep -v "ARTEFACT" | sed 's/ /\t/g' > $y.rc.bed
+bedtools intersect -a $y.rc.bed -b ../$ind.$prefix.un.hetlist -wb > $y.rc.hetcount
+done
+if [ -f "$ind.$prefix.rep.profile" ]
+then
+rm $ind.$prefix.rep.profile
+fi
+for x in *.rc.hetcount
+do
+y=`echo $x | sed 's/.rc.hetcount//g'`
+while read p
+do
+rcbed=`echo $x | sed 's/.rc.hetcount/.rc.bed/g'`
+regionlen=`cat $rcbed|awk -v rc=$p '$4==rc {print $0}'|awk '{print $3-$2}'|awk '{s += $1}END{print s}'`
+totcount=`awk -v rc=$p '{ if ( $4 == rc ){ print $0; } }' $x | wc -l`
+ycount=`awk -v rc=$p '{ if ( $4 == rc && ($8 == "Y" || $8 == "y")){print $0}}' $x | wc -l`
+rcount=`awk -v rc=$p '{ if ( $4 == rc && ($8 == "R" || $8 == "r")){print $0}}' $x | wc -l`
+wcount=`awk -v rc=$p '{ if ( $4 == rc && ($8 == "W" || $8 == "w")){print $0}}' $x | wc -l`
+scount=`awk -v rc=$p '{ if ( $4 == rc && ($8 == "S" || $8 == "s")){print $0}}' $x | wc -l`
+kcount=`awk -v rc=$p '{ if ( $4 == rc && ($8 == "K" || $8 == "k")){print $0}}' $x | wc -l`
+mcount=`awk -v rc=$p '{ if ( $4 == rc && ($8 == "M" || $8 == "m")){print $0}}' $x | wc -l`
+Ts_count=`echo $ycount $rcount | awk '{print $1 + $2}'`
+Tv_count=`echo $wcount $scount $kcount $mcount | awk '{print $1+$2+$3+$4}'`
+Ts_Tv=`echo $Ts_count $Tv_count | awk '{if($2 !=0){print $1/$2} else if($2==0){print "NA"}}'`
+hetpercent=`echo $totcount $regionlen | awk '{if($1 !=0){print ($1/$2)*100} else if($1==0){print "NA"}}'`
+echo $y $p $regionlen $totcount $kcount $mcount $rcount $scount $wcount $ycount $Ts_count $Tv_count $Ts_Tv $hetpercent | awk '{if ( $4 != "0" ) { print $0; } }' | sed 's/ /\t/g' | grep -v "ARTEFACT" >> $ind.$prefix.rep.profile
+done < $ind.$prefix.rep_class.txt
+done
+sed '1i Atomic_Interval\tRepeatclass\tRegion_length\tHety_count\tK_count\tM_count\tR_count\tS_count\tW_count\tY_count\tTransitions\tTransversions\tTs/Tv_ratio\tHety_percent' $ind.$prefix.rep.profile > $ind.$prefix.rep.profile.head
+cd ../s100
+echo "Now, analysing decoded atomic intervals and repeat profiling"
+rd20=`awk '$2==20 {print $1,$2,NR}' $ind.$prefix.hm.s100.psmc | grep "RD" | awk '{print $3}'`
+rd21=`awk '$2==21 {print $1,$2,NR}' $ind.$prefix.un.s100.psmc | grep "RD" | awk '{print $3}'`
+awk -v a="$rd20" -v b="$rd21" 'NR==a, NR==b' $ind.$prefix.hm.s100.psmc | grep "RS" | awk '{print $2,$5}' | sed 's/ /\t/g' > $ind.$prefix.hm.s100.RE
+awk -v a="$rd20" -v b="$rd21" 'NR==a, NR==b' $ind.$prefix.un.s100.psmc | grep "RS" | awk '{print $2,$5}' | sed 's/ /\t/g' > $ind.$prefix.un.s100.RE
+mod_dec.pl -s100 $ind.$prefix.hm.s100.psmc | awk '{ print >$4".hm"}'
+mod_dec.pl -s100 $ind.$prefix.hm.s100.psmc | awk '{print $4,$3-$2}' > $ind.$prefix.hm.s100.int.lengths
+mod_dec.pl -s100 $ind.$prefix.un.s100.psmc | awk '{ print >$4".un"}'
+mod_dec.pl -s100 $ind.$prefix.un.s100.psmc | awk '{print $4,$3-$2}' > $ind.$prefix.un.s100.int.lengths
+ni=`awk '{print $1}' $ind.$prefix.un.s100.RE|tail -1`
+for a in *.psmc
+do
+b=`echo $a | sed 's/.psmc//g'`
+cat $a | grep "^RS" | awk '{print $5}' > $b.nrec
+done
+if [ -f "$ind.$prefix.un.rep_int.txt" ]
+then
+rm $ind.$prefix.un.rep_int.txt
+fi
+for (( c=0; c<=$ni; c++ ))
+do
+x="$c".un
+if [ -f "${x}" ]
+then
+awk '{print $1,$2,$3}' ${x}| sed 's/ /\t/g' > ${x}.bed
+bedtools intersect -wao -a ${x}.bed -b ../$prefix.mask.pos | sed 's/ /\t/g' > ${x}.txt
+total=`cat ${x} | awk '{sum += ($3-$2)} END {print sum}'`
+rep=`cat ${x}.txt | awk '{sum += $7} END {print sum}'`
+percent=`echo $rep $total|awk '{ print ($1/$2)*100 }'`
+echo ${x} $total $rep $percent | sed 's/ /\t/g' >> $ind.$prefix.un.rep_int.txt
+else
+echo "${x} 0 0 0"|cat|sed 's/ /\t/g' >>  $ind.$prefix.un.rep_int.txt
+fi
+done
+sed '1i Atomic_Interval\tTOTAL_Length_of_Interval\tRepeat_Length\tPercent of repeats' $ind.$prefix.un.rep_int.txt > $ind.$prefix.un.rep_int.txt.head
+if [ -f "$ind.$prefix.hm.rep_int.txt" ]
+then
+rm $ind.$prefix.hm.rep_int.txt
+fi
+for (( c=0; c<=$ni; c++ ))
+do
+x="$c".hm
+if [ -f "${x}" ]
+then
+awk '{print $1,$2,$3}' ${x}| sed 's/ /\t/g' > ${x}.bed
+bedtools intersect -wao -a ${x}.bed -b ../$prefix.mask.pos | sed 's/ /\t/g' > ${x}.txt
+total=`cat ${x} | awk '{sum += ($3-$2)} END {print sum}'`
+rep=`cat ${x}.txt | awk '{sum += $7} END {print sum}'`
+percent=`echo $rep $total|awk '{ print ($1/$2)*100 }'`
+echo ${x} $total $rep $percent | sed 's/ /\t/g' >> $ind.$prefix.hm.rep_int.txt
+else
+echo "${x} 0 0 0"|cat|sed 's/ /\t/g' >>  $ind.$prefix.hm.rep_int.txt
+fi
+done
+sed '1i Atomic_Interval\tTOTAL_Length_of_Interval\tRepeat_Length\tPercent of repeats' $ind.$prefix.hm.rep_int.txt > $ind.$prefix.hm.rep_int.txt.head
+for (( c=0; c<=$ni; c++ ))
+do
+x="$c".un.bed
+if [ -f "${x}" ]
+then
+bedtools intersect -wao -a ${x} -b ../$ind.$prefix.un.hetlist > $x.hetlist
+fi
+done
+for (( c=0; c<=$ni; c++ ))
+do
+x="$c".hm.bed
+if [ -f "${x}" ]
+then
+bedtools intersect -wao -a ${x} -b ../$ind.$prefix.hm.hetlist > $x.hetlist
+fi
+done
+find ./*.bed.hetlist -size 0 -delete
+if [ -f "$ind.$prefix.un.hetcount" ]
+then
+rm $ind.$prefix.un.hetcount
+fi
+for x in `cat $ind.$prefix.un.rep_int.txt | sed 's/\t/_/g'`
+do
+y=`echo $x|cut -f 1 -d '_'`
+if [ -f "$y".bed.hetlist ]
+then
+totcount=`cat "$y".bed.hetlist | awk '{ if ( $7 != "." ) { print $0; } }' | wc -l`
+kcount=`cat "$y".bed.hetlist | awk '($7 == "K" || $7 == "k"){print $0}' | wc -l`
+mcount=`cat "$y".bed.hetlist | awk '($7 == "M" || $7 == "m"){print $0}' | wc -l`
+rcount=`cat "$y".bed.hetlist | awk '($7 == "R" || $7 == "r"){print $0}' | wc -l`
+scount=`cat "$y".bed.hetlist | awk '($7 == "S" || $7 == "s"){print $0}' | wc -l`
+wcount=`cat "$y".bed.hetlist | awk '($7 == "W" || $7 == "w"){print $0}' | wc -l`
+ycount=`cat "$y".bed.hetlist | awk '($7 == "Y" || $7 == "y"){print $0}' | wc -l`
+echo $x $totcount $kcount $mcount $rcount $scount $wcount $ycount | sed 's/_/\t/g' | awk '{print $1,$2,$3,$4,$5/$2,$6/$2,$7/$2,$8/$2,$9/$2,$10/$2,$11/$2}' >> $ind.$prefix.un.hetcount
+else
+echo $x 0 0 0 0 0 0 0|sed 's/_/\t/g' >> $ind.$prefix.un.hetcount
+fi
+done
+sed '1i Atomic_Interval\tTotal_Length_of_Interval\tRepeat_Length\tPercent_of_repeats\tFraction_of_K\tFraction_of_M\tFraction_of_R\tFraction_of_S\tFraction_of_W\tFraction_of_Y' $ind.$prefix.un.hetcount > $ind.$prefix.un.hetcount.head
+if [ -f "$ind.$prefix.hm.hetcount" ]
+then
+rm $ind.$prefix.hm.hetcount
+fi
+for x in `cat $ind.$prefix.hm.rep_int.txt|sed 's/\t/_/g'`
+do
+y=`echo $x|cut -f 1 -d '_'`
+if [ -f "$y".bed.hetlist ]
+then
+totcount=`cat "$y".bed.hetlist | awk '{ if ( $7 != "." ) { print $0; } }'|wc -l`
+kcount=`cat "$y".bed.hetlist | awk '($7 == "K" || $7 == "k"){print $0}'|wc -l`
+count=`cat "$y".bed.hetlist |awk '($7 == "M" || $7 == "m"){print $0}'|wc -l`
+rcount=`cat "$y".bed.hetlist |awk '($7 == "R" || $7 == "r"){print $0}'|wc -l`
+scount=`cat "$y".bed.hetlist |awk '($7 == "S" || $7 == "s"){print $0}'|wc -l`
+wcount=`cat "$y".bed.hetlist |awk '($7 == "W" || $7 == "w"){print $0}'|wc -l`
+ycount=`cat "$y".bed.hetlist |awk '($7 == "Y" || $7 == "y"){print $0}'|wc -l`
+echo $x $totcount $kcount $mcount $rcount $scount $wcount $ycount|sed 's/_/\t/g'|awk '{print $1,$2,$3,$4,$5/$2,$6/$2,$7/$2,$8/$2,$9/$2,$10/$2,$11/$2}' >> $ind.$prefix.hm.hetcount
+else
+echo $x 0 0 0 0 0 0 0|sed 's/_/\t/g' >> $ind.$prefix.hm.hetcount
+fi
+done
+sed '1i Atomic_Interval\tTotal_Length_of_Interval\tRepeat_Length\tPercent_of_repeats\tFraction_of_K\tFraction_of_M\tFraction_of_R\tFraction_of_S\tFraction_of_W\tFraction_of_Y' $ind.$prefix.un.hetcount > $ind.$prefix.un.hetcount.head
+cut -f4 ../repclass/$prefix.repclass | sort | uniq -c | awk '{print $2}' > $ind.$prefix.rep_class.txt
+for x in *.un.bed
+do
+y=`echo $x | sed 's/.un.bed//g'`
+bedtools subtract -a $x -b ../repclass/$prefix.repclass | bedtools subtract -a $x -b stdin | bedtools intersect -a stdin -b ../repclass/$prefix.repclass -wb | awk '{print $1,$2,$3,$7}' | grep -v "ARTEFACT" | sed 's/ /\t/g' > $y.rc.bed
+bedtools intersect -a $y.rc.bed -b ../$ind.$prefix.un.hetlist -wb > $y.rc.hetcount
+done
+if [ -f "$ind.$prefix.rep.profile" ]
+then
+rm $ind.$prefix.rep.profile
+fi
+for x in *.rc.hetcount
+do
+y=`echo $x | sed 's/.rc.hetcount//g'`
+while read p
+do
+rcbed=`echo $x | sed 's/.rc.hetcount/.rc.bed/g'`
+regionlen=`cat $rcbed|awk -v rc=$p '$4==rc {print $0}'|awk '{print $3-$2}'|awk '{s += $1}END{print s}'`
+totcount=`awk -v rc=$p '{ if ( $4 == rc ){ print $0; } }' $x | wc -l`
+ycount=`awk -v rc=$p '{ if ( $4 == rc && ($8 == "Y" || $8 == "y")){print $0}}' $x | wc -l`
+rcount=`awk -v rc=$p '{ if ( $4 == rc && ($8 == "R" || $8 == "r")){print $0}}' $x | wc -l`
+wcount=`awk -v rc=$p '{ if ( $4 == rc && ($8 == "W" || $8 == "w")){print $0}}' $x | wc -l`
+scount=`awk -v rc=$p '{ if ( $4 == rc && ($8 == "S" || $8 == "s")){print $0}}' $x | wc -l`
+kcount=`awk -v rc=$p '{ if ( $4 == rc && ($8 == "K" || $8 == "k")){print $0}}' $x | wc -l`
+mcount=`awk -v rc=$p '{ if ( $4 == rc && ($8 == "M" || $8 == "m")){print $0}}' $x | wc -l`
+Ts_count=`echo $ycount $rcount | awk '{print $1 + $2}'`
+Tv_count=`echo $wcount $scount $kcount $mcount | awk '{print $1+$2+$3+$4}'`
+Ts_Tv=`echo $Ts_count $Tv_count | awk '{if($2 !=0){print $1/$2} else if($2==0){print "NA"}}'`
+hetpercent=`echo $totcount $regionlen | awk '{if($1 !=0){print ($1/$2)*100} else if($1==0){print "NA"}}'`
+echo $y $p $regionlen $totcount $kcount $mcount $rcount $scount $wcount $ycount $Ts_count $Tv_count $Ts_Tv $hetpercent | awk '{if ( $4 != "0" ) { print $0; } }' | sed 's/ /\t/g' | grep -v "ARTEFACT" >> $ind.$prefix.rep.profile
+done < $ind.$prefix.rep_class.txt
+done
+sed '1i Atomic_Interval\tRepeatclass\tRegion_length\tHety_count\tK_count\tM_count\tR_count\tS_count\tW_count\tY_count\tTransitions\tTransversions\tTs/Tv_ratio\tHety_percent' $ind.$prefix.rep.profile > $ind.$prefix.rep.profile.head
+cd ../repclass
+cat $prefix.repclass | sed 's/ /\t/g' | sed 's/\//_/g'| sed 's/\?//g' | awk '{ print >$4".rc" }'
+for a in *.rc
+do
+bedtools intersect -wb -a $a -b ../$ind.$prefix.un.hetlist > $a.hetlist
+j=`echo $a | sed 's/.rc//g'`
+bedtools intersect -a ../$prefix.repclass -b $a -v > $a.bed
+bedtools maskfasta -fi ../$prefix.un -fo $j.fna -bed $a.bed
+samtools faidx $j.fna
+samtools mpileup -Q20 -q20 -C50 -uf $j.fna ../../$bamfile | bcftools call --threads $threads -c | vcfutils.pl vcf2fq -Q 25 -d $d -D $D | gzip > $j.fq.gz
+fq2psmcfa $j.fq.gz > $j.psmcfa
+psmc -d -N25 -t5 -r5 -p $atomic -o $j.psmc $j.psmcfa
+psmc_plot.pl -R -u $mutr -g $Time $j $j.psmc
+done
+for a in *.psmc
+do
+b=`echo $a | sed 's/.psmc//g'`
+cat $a |  grep "^RS" | awk '{print $5}' > $b.nrec
+mod_dec.pl -s100 $a | awk '{print $4,$3-$2}' > $b.lengths
+done
+if [ -f "repclass.Ts_Tv.un.txt" ]
+then
+rm repclass.Ts_Tv.un.txt
+fi
+for a in *.rc.hetlist
+do
+b=`echo $a | sed 's/.rc.hetlist//g'`
+totcount=`cat $a | awk '{ if ( $8 != "." ) { print $0; } }'|wc -l`
+ycount=`cat $a |awk '($8 == "Y" || $8 == "y"){print $0}'|wc -l`
+rcount=`cat $a |awk '($8 == "R" || $8 == "r"){print $0}'|wc -l`
+wcount=`cat $a |awk '($8 == "W" || $8 == "w"){print $0}'|wc -l`
+scount=`cat $a |awk '($8 == "S" || $8 == "s"){print $0}'|wc -l`
+kcount=`cat $a |awk '($8 == "K" || $8 == "k"){print $0}'|wc -l`
+mcount=`cat $a |awk '($8 == "M" || $8 == "m"){print $0}'|wc -l`
+Ts_count=`echo $ycount $rcount | awk '{print $1 + $2}'`
+Tv_count=`echo $wcount $scount $kcount $mcount | awk '{print $1+$2+$3+$4}'`
+Ts_Tv=`echo $Ts_count $Tv_count | awk '{if($2 !=0){print $1/$2} else if($2==0){print "NA"}}'`
+echo $b $totcount $Ts_count $Tv_count $Ts_Tv | sed 's/ /\t/g' >> repclass.Ts_Tv.un.txt
+done
+sed '1i Repeat_Class\tTotal_Length\tNo_of_Transversions\tNo_of_Transitions' repclass.Ts_Tv.un.txt > repclass.Ts_Tv.un.txt.head
+echo "Done with the analysis..."
+echo "Now, Plotting the figures"
+cd ../
+echo "#!/usr/bin/env Rscript
+args = commandArgs(trailingOnly=TRUE)
+mu <- as.numeric(args[2])
+gen <- as.numeric(args[3])
+gen_size <- as.numeric(args[4])
+pt_hm_s20 <- read.table(paste(\"s20/\",args[1],\".hm.s20.0.txt\",sep=\"\"), header = FALSE)
+pt_hm_s50 <- read.table(paste(\"s50/\",args[1],\".hm.s50.0.txt\",sep=\"\"), header = FALSE)
+pt_hm_s100 <- read.table(paste(\"s100/\",args[1],\".hm.s100.0.txt\",sep=\"\"), header = FALSE)
+pt_un_s20 <- read.table(paste(\"s20/\",args[1],\".un.s20.0.txt\",sep=\"\"), header = FALSE)
+pt_un_s50 <- read.table(paste(\"s50/\",args[1],\".un.s50.0.txt\",sep=\"\"), header = FALSE)
+pt_un_s100 <- read.table(paste(\"s100/\",args[1],\".un.s100.0.txt\",sep=\"\"), header = FALSE)
+msmc_hm <- read.table(paste(\"msmc/\",args[1],\".hm.final.txt\",sep=\"\"),header=T)
+msmc_un <- read.table(paste(\"msmc/\",args[1],\".un.final.txt\",sep=\"\"),header=T)
+hz_un_s100 <- read.table(paste(\"s100/\",args[1],\".un.hetcount\",sep=\"\"), header = FALSE)
+hz_hm_s100 <- read.table(paste(\"s100/\",args[1],\".hm.hetcount\",sep=\"\"), header = FALSE)
+hz_un_s50 <- read.table(paste(\"s50/\",args[1],\".un.hetcount\",sep=\"\"), header = FALSE)
+hz_hm_s50 <- read.table(paste(\"s50/\",args[1],\".hm.hetcount\",sep=\"\"), header = FALSE)
+hz_un_s20 <- read.table(paste(\"s20/\",args[1],\".un.hetcount\",sep=\"\"), header = FALSE)
+hz_hm_s20 <- read.table(paste(\"s20/\",args[1],\".hm.hetcount\",sep=\"\"), header = FALSE)
+
+
+#######################################################################################################################################
+############################# Plotting repeat content PSMC ############################################################################
+#######################################################################################################################################
+
+pdf(paste(args[1],\"_repeat_effect_s100.pdf\",sep=\"\"),height=10,width=20)
+plot(pt_un_s100\$V1,(pt_un_s100\$V2*10000),log=\"x\",ylim=c(0,max(pt_un_s100\$V2*10000)*1.5),type=\"n\", xlab=\"Years ago\", ylab=\"effective population size\",main=\"Effect of repeat on PSMC s100\")
+lines(pt_hm_s100\$V1,(pt_hm_s100\$V2*10000),type=\"s\",col=\"blue\",lwd=2)
+lines(pt_un_s100\$V1,(pt_un_s100\$V2*10000),type=\"s\",col=\"orangered\",lwd=2)
+lines(msmc_hm\$left_time_boundary/mu*gen,(1/msmc_hm\$lambda_00)/(2*mu),type=\"s\",col=\"skyblue\",lwd=2)
+lines(msmc_un\$left_time_boundary/mu*gen,(1/msmc_un\$lambda_00)/(2*mu),type=\"s\",col=\"red\",lwd=2)
+points(pt_un_s100\$V1,(pt_un_s100\$V2*10000),col=\"black\",pch=20,cex=c(hz_un_s100\$V4/10))
+legend(\"topleft\",legend=c(\"PSMC Masked\",\"PSMC Unmasked\",\"MSMC Unmasked\",\"MSMC Masked\"),col=c(\"blue\",\"orangered\",\"red\",\"skyblue\"),lwd=3)
+dev.off()
+
+pdf(paste(args[1],\"_repeat_effect_s50.pdf\",sep=\"\"),height=10,width=20)
+plot(pt_un_s50\$V1,(pt_un_s50\$V2*10000),log=\"x\",ylim=c(0,max(pt_un_s100\$V2*10000)*1.5),type=\"n\", xlab=\"Years ago\", ylab=\"effective population size\",main=\"Effect of repeat on PSMC s50\")
+lines(pt_hm_s50\$V1,(pt_hm_s50\$V2*10000),type=\"s\",col=\"blue\",lwd=2)
+lines(pt_un_s50\$V1,(pt_un_s50\$V2*10000),type=\"s\",col=\"orangered\",lwd=2)
+lines(msmc_hm\$left_time_boundary/mu*gen,(1/msmc_hm\$lambda_00)/(2*mu),type=\"s\",col=\"skyblue\",lwd=2)
+lines(msmc_un\$left_time_boundary/mu*gen,(1/msmc_un\$lambda_00)/(2*mu),type=\"s\",col=\"red\",lwd=2)
+points(pt_un_s50\$V1,(pt_un_s50\$V2*10000),col=\"black\",pch=20,cex=c(hz_un_s50\$V4/10))
+legend(\"topleft\",legend=c(\"PSMC Masked\",\"PSMC Unmasked\",\"MSMC Unmasked\",\"MSMC Masked\"),col=c(\"blue\",\"orangered\",\"red\",\"skyblue\"),lwd=3)
+dev.off()
+
+pdf(paste(args[1],\"_repeat_effect_s20.pdf\",sep=\"\"),height=10,width=20)
+plot(pt_un_s20\$V1,(pt_un_s20\$V2*10000),log=\"x\",ylim=c(0,max(pt_un_s100\$V2*10000)*1.5),type=\"n\", xlab=\"Years ago\", ylab=\"effective population size\",main=\"Effect of repeat on PSMC s20\")
+lines(pt_hm_s20\$V1,(pt_hm_s20\$V2*10000),type=\"s\",col=\"blue\",lwd=2)
+lines(pt_un_s20\$V1,(pt_un_s20\$V2*10000),type=\"s\",col=\"orangered\",lwd=2)
+lines(msmc_hm\$left_time_boundary/mu*gen,(1/msmc_hm\$lambda_00)/(2*mu),type=\"s\",col=\"skyblue\",lwd=2)
+lines(msmc_un\$left_time_boundary/mu*gen,(1/msmc_un\$lambda_00)/(2*mu),type=\"s\",col=\"red\",lwd=2)
+points(pt_un_s20\$V1,(pt_un_s20\$V2*10000),col=\"black\",pch=20,cex=c(hz_un_s20\$V4/10))
+legend(\"topleft\",legend=c(\"PSMC Masked\",\"PSMC Unmasked\",\"MSMC Unmasked\",\"MSMC Masked\"),col=c(\"blue\",\"orangered\",\"red\",\"skyblue\"),lwd=2)
+dev.off()
+
+pdf(paste(args[1],\"_repeat_effect_all.pdf\",sep=\"\"),height=10,width=20)
+plot(pt_un_s100\$V1,(pt_un_s100\$V2*10000),log=\"x\",ylim=c(0,max(pt_un_s100\$V2*10000)*1.5),type=\"n\", xlab=\"Years ago\", ylab=\"effective population size\",main=\"Effect of repeat on PSMC s100\")
+lines(pt_hm_s100\$V1,(pt_hm_s100\$V2*10000),type=\"s\",col=\"blue\",lwd=2)
+lines(pt_un_s100\$V1,(pt_un_s100\$V2*10000),type=\"s\",col=\"orangered\",lwd=2)
+lines(msmc_hm\$left_time_boundary/mu*gen,(1/msmc_hm\$lambda_00)/(2*mu),type=\"s\",col=\"skyblue\",lwd=2)
+lines(msmc_un\$left_time_boundary/mu*gen,(1/msmc_un\$lambda_00)/(2*mu),type=\"s\",col=\"red\",lwd=2)
+points(pt_un_s100\$V1,(pt_un_s100\$V2*10000),col=\"black\",pch=20,cex=c(hz_un_s100\$V4/10))
+legend(\"topleft\",legend=c(\"PSMC Masked\",\"PSMC Unmasked\",\"MSMC Unmasked\",\"MSMC Masked\"),col=c(\"blue\",\"orangered\",\"red\",\"skyblue\"),lwd=2)
+plot(pt_un_s50\$V1,(pt_un_s50\$V2*10000),log=\"x\",ylim=c(0,max(pt_un_s100\$V2*10000)*1.5),type=\"n\", xlab=\"Years ago\", ylab=\"effective population size\",main=\"Effect of repeat on PSMC s50\")
+lines(pt_hm_s50\$V1,(pt_hm_s50\$V2*10000),type=\"s\",col=\"blue\",lwd=2)
+lines(pt_un_s50\$V1,(pt_un_s50\$V2*10000),type=\"s\",col=\"orangered\",lwd=2)
+lines(msmc_hm\$left_time_boundary/mu*gen,(1/msmc_hm\$lambda_00)/(2*mu),type=\"s\",col=\"skyblue\",lwd=2)
+lines(msmc_un\$left_time_boundary/mu*gen,(1/msmc_un\$lambda_00)/(2*mu),type=\"s\",col=\"red\",lwd=2)
+points(pt_un_s50\$V1,(pt_un_s50\$V2*10000),col=\"black\",pch=20,cex=c(hz_un_s100\$V4/10))
+legend(\"topleft\",legend=c(\"PSMC Masked\",\"PSMC Unmasked\",\"MSMC Unmasked\",\"MSMC Masked\"),col=c(\"blue\",\"orangered\",\"red\",\"skyblue\"),lwd=2)
+plot(pt_un_s20\$V1,(pt_un_s20\$V2*10000),log=\"x\",ylim=c(0,max(pt_un_s100\$V2*10000)*1.5),type=\"n\", xlab=\"Years ago\", ylab=\"effective population size\",main=\"Effect of repeat on PSMC s20\")
+lines(pt_hm_s20\$V1,(pt_hm_s20\$V2*10000),type=\"s\",col=\"blue\",lwd=2)
+lines(pt_un_s20\$V1,(pt_un_s20\$V2*10000),type=\"s\",col=\"orangered\",lwd=2)
+lines(msmc_hm\$left_time_boundary/mu*gen,(1/msmc_hm\$lambda_00)/(2*mu),type=\"s\",col=\"skyblue\",lwd=2)
+lines(msmc_un\$left_time_boundary/mu*gen,(1/msmc_un\$lambda_00)/(2*mu),type=\"s\",col=\"red\",lwd=2)
+points(pt_un_s20\$V1,(pt_un_s20\$V2*10000),col=\"black\",pch=20,cex=c(hz_un_s100\$V4/10))
+legend(\"topleft\",legend=c(\"PSMC Masked\",\"PSMC Unmasked\",\"MSMC Unmasked\",\"MSMC Masked\"),col=c(\"blue\",\"orangered\",\"red\",\"skyblue\"),lwd=2)
+dev.off()
+
+#######################################################################################################################################
+############################################ Plotting repeat class PSMC ###############################################################
+#######################################################################################################################################
+
+rep_col <- c(\"plum1\",\"hotpink\",\"darkolivegreen\",\"peru\",\"olivedrab1\",\"orange2\",\"darkseagreen1\",\"palevioletred1\",\"navy\",\"khaki\",\"gray50\",\"cornflowerblue\",\"yellowgreen\",\"chartreuse4\",\"cadetblue4\",\"burlywood4\",\"brown4\",\"blueviolet\",\"bisque4\",\"aquamarine1\",\"aquamarine3\",\"aquamarine4\",\"azure3\",\"azure4\",\"brown3\",\"burlywood3\",\"cadetblue2\",\"chartreuse1\",\"chocolate2\",\"coral\",\"coral2\",\"coral3\",\"coral4\",\"cornsilk4\",\"cyan3\",\"cyan4\",\"darkblue\",\"darkgoldenrod\",\"darkgoldenrod2\",\"darkgoldenrod4\",\"darkmagenta\")
+colcount <- 0
+rep = list.files(\"repclass\",pattern=\".0.txt\",full.names=TRUE)
+repclass <- sapply(strsplit(sapply(strsplit(rep,\"[.]\"), \`[\`, 1),\"[/]\"), \`[\`, 2)
+pdf(paste(args[1],\"_repclass_PSMC_s100.pdf\",sep=\"\"),height=10,width=20)
+plot(pt_un_s100\$V1,(pt_un_s100\$V2*10000),log=\"x\",ylim=c(0,max(pt_un_s100\$V2*10000)*1.5),type=\"n\", xlab=\"Years ago\", ylab=\"effective population size\",main=\"Effect of repeat on PSMC s100\")
+for (i in rep){
+colcount <- colcount+1
+read.table(file=i,header=FALSE)-> repc
+lines(repc\$V1,(repc\$V2*10000),type=\"s\",col=rep_col[colcount],lwd=2)
+}
+lines(pt_un_s100\$V1,(pt_un_s100\$V2*10000),type=\"s\",col=\"orangered\",lwd=2)
+lines(pt_hm_s100\$V1,(pt_hm_s100\$V2*10000),type=\"s\",col=\"blue\",lwd=2)
+legend(\"top\",legend=repclass,fill=rep_col,ncol = 5,cex=1.75)
+legend(\"bottomleft\",legend=c(\"Unmasked\",\"Masked\"),fill=c(\"orangered\",\"blue\"),cex=1.5)
+dev.off()
+
+#######################################################################################################################################
+
+#######################################################################################################################################
+##################### Plotting Regression plot between difference in Ne and Repeat content ############################################
+#######################################################################################################################################
+
+s100_ne_diff <- abs(pt_un_s100\$V2-pt_hm_s100\$V2)
+s50_ne_diff <- abs(pt_un_s50\$V2-pt_hm_s50\$V2)
+s20_ne_diff <- abs(pt_un_s20\$V2-pt_hm_s20\$V2)
+reg_s100 <- lm(hz_un_s100\$V4[1:length(s100_ne_diff)]~s100_ne_diff)
+reg_s50 <- lm(hz_un_s50\$V4[1:length(s50_ne_diff)]~s50_ne_diff)
+reg_s20 <- lm(hz_un_s20\$V4[1:length(s20_ne_diff)]~s20_ne_diff)
+coeff_s100=coefficients(reg_s100)
+coeff_s50=coefficients(reg_s50)
+coeff_s20=coefficients(reg_s20)
+eq_s100 = paste0(\"y = \", round(coeff_s100[2],1), \"x\", round(coeff_s100[1],1))
+eq_s50 = paste0(\"y = \", round(coeff_s50[2],1), \"x\", round(coeff_s50[1],1))
+eq_s20 = paste0(\"y = \", round(coeff_s20[2],1), \"x \", round(coeff_s20[1],1))
+ken_s100 <- cor.test(hz_un_s100\$V4[1:length(s20_ne_diff)],s100_ne_diff, method=\"kendall\")
+ken_s50 <- cor.test(hz_un_s50\$V4[1:length(s20_ne_diff)],s50_ne_diff, method=\"kendall\")
+ken_s20 <- cor.test(hz_un_s20\$V4[1:length(s20_ne_diff)],s20_ne_diff, method=\"kendall\")
+tau_s100 = paste0(\"Tau = \", ken_s100\$estimate)
+tau_s50 = paste0(\"Tau = \", ken_s50\$estimate)
+tau_s20 = paste0(\"Tau = \", ken_s20\$estimate)
+pval_s100 = paste0(\"P-value = \", ken_s100\$p.value)
+pval_s50 = paste0(\"P-value = \", ken_s50\$p.value)
+pval_s20 = paste0(\"P-value = \", ken_s20\$p.value)
+
+pdf(paste(args[1],\"_correlation_repeat_s100.pdf\",sep=\"\"))
+plot(hz_un_s100\$V4[1:length(s100_ne_diff)]~s100_ne_diff,main=\"s100_repeat_content_correlation\",ylab=\"Repeat content\",xlab=\"Difference in Ne\",pch=20)
+abline(reg_s100, col=\"blue\",lwd=2,lty=4)
+text(mean(s100_ne_diff), min(hz_un_s100\$V4)+2, labels=eq_s100, srt=0.2, col = \"red\")
+text(mean(s100_ne_diff), min(hz_un_s100\$V4)+4, labels=tau_s100, col = \"red\")
+text(mean(s100_ne_diff), min(hz_un_s100\$V4)+6, labels=pval_s100, col = \"red\")
+dev.off()
+
+pdf(paste(args[1],\"_correlation_repeat_s50.pdf\",sep=\"\"))
+plot(hz_un_s50\$V4[1:length(s50_ne_diff)]~s50_ne_diff,main=\"s50_repeat_content_correlation\",ylab=\"Repeat content\",xlab=\"Difference in Ne\",
+pch=20)
+abline(reg_s50, col=\"blue\",lwd=2,lty=4)
+text(mean(s50_ne_diff), min(hz_un_s50\$V4)+2, labels=eq_s50, srt=0.2, col = \"red\")
+text(mean(s50_ne_diff), min(hz_un_s50\$V4)+4, labels=tau_s50, col = \"red\")
+text(mean(s50_ne_diff), min(hz_un_s50\$V4)+6, labels=pval_s50, col = \"red\")
+dev.off()
+
+pdf(paste(args[1],\"_correlation_repeat_s20.pdf\",sep=\"\"))
+plot(hz_un_s20\$V4[1:length(s20_ne_diff)]~s20_ne_diff,main=\"s20_repeat_content_correlation\",ylab=\"Repeat content\",xlab=\"Difference in Ne\",
+pch=20)
+abline(reg_s20, col=\"blue\",lwd=2,lty=4)
+text(mean(s20_ne_diff), min(hz_un_s20\$V4)+2, labels=eq_s20, srt=0.2, col = \"red\")
+text(mean(s20_ne_diff), min(hz_un_s20\$V4)+4, labels=tau_s20, col = \"red\")
+text(mean(s20_ne_diff), min(hz_un_s20\$V4)+6, labels=pval_s20, col = \"red\")
+dev.off()
+
+pdf(paste(args[1],\"_correlation_repeat_all.pdf\",sep=\"\"))
+plot(hz_un_s100\$V4[1:length(s100_ne_diff)]~s100_ne_diff,main=\"s100_repeat_content_correlation\",ylab=\"Repeat content\",xlab=\"Difference in Ne\",pch=20)
+abline(reg_s100, col=\"blue\",lwd=2,lty=4)
+text(mean(s100_ne_diff), min(hz_un_s100\$V4)+2, labels=eq_s100, srt=0.2, col = \"red\")
+text(mean(s100_ne_diff), min(hz_un_s100\$V4)+4, labels=tau_s100, col = \"red\")
+text(mean(s100_ne_diff), min(hz_un_s100\$V4)+6, labels=pval_s100, col = \"red\")
+plot(hz_un_s50\$V4[1:length(s50_ne_diff)]~s50_ne_diff,main=\"s50_repeat_content_correlation\",ylab=\"Repeat content\",xlab=\"Difference in Ne\",pch=20)
+abline(reg_s50, col=\"blue\",lwd=2,lty=4)
+text(mean(s50_ne_diff), min(hz_un_s50\$V4)+2, labels=eq_s50, srt=0.2, col = \"red\")
+text(mean(s50_ne_diff), min(hz_un_s50\$V4)+4, labels=tau_s50, col = \"red\")
+text(mean(s50_ne_diff), min(hz_un_s50\$V4)+6, labels=pval_s50, col = \"red\")
+plot(hz_un_s20\$V4[1:length(s20_ne_diff)]~s20_ne_diff,main=\"s20_repeat_content_correlation\",ylab=\"Repeat content\",xlab=\"Difference in Ne\",pch=20)
+abline(reg_s20, col=\"blue\",lwd=2,lty=4)
+text(mean(s20_ne_diff), min(hz_un_s20\$V4)+2, labels=eq_s20, srt=0.2, col = \"red\")
+text(mean(s20_ne_diff), min(hz_un_s20\$V4)+4, labels=tau_s20, col = \"red\")
+text(mean(s20_ne_diff), min(hz_un_s20\$V4)+6, labels=pval_s20, col = \"red\")
+dev.off()
+
+
+########################################################################################################################################
+#################################### Plotting Repeat Class Ts/Tv and Hety Plots #######################################################
+#######################################################################################################################################
+
+O_s20 <- read.table(paste(\"s20/\",args[1],\".rep.profile.head\",sep=\"\"),header=TRUE,fill=TRUE)
+O_s50 <- read.table(paste(\"s50/\",args[1],\".rep.profile.head\",sep=\"\"),header=TRUE,fill=TRUE)
+O_s100 <- read.table(paste(\"s100/\",args[1],\".rep.profile.head\",sep=\"\"),header=TRUE,fill=TRUE)
+N_s20 <- O_s20[is.finite(O_s20\$Ts.Tv_ratio),]
+N_s20 <- N_s20[is.finite(N_s20\$Hety_percent),]
+M_s20 <- N_s20[order(N_s20\$Atomic_Interval),]
+N_s50 <- O_s50[is.finite(O_s50\$Ts.Tv_ratio),]
+N_s50 <- N_s50[is.finite(N_s50\$Hety_percent),]
+M_s50 <- N_s50[order(N_s50\$Atomic_Interval),]
+N_s100 <- O_s100[is.finite(O_s100\$Ts.Tv_ratio),]
+N_s100 <- N_s100[is.finite(N_s100\$Hety_percent),]
+M_s100 <- N_s100[order(N_s100\$Atomic_Interval),]
+
+pdf(paste(args[1],\".rep_tstv.s100.pdf\",sep=\"\"),height=15,width=20)
+par(mfrow=c(4,5))
+N <- O_s100[is.finite(O_s100\$Ts.Tv_ratio),]
+N <- N[is.finite(N\$Hety_percent),]
+M <- N[order(N\$Atomic_Interval),]
+colcount<-1
+for (repclass in unique(M\$Repeatclass)) {
+colcount<-colcount+1
+par(mar = c(6, 4, 4, 6))
+plot(M\$Atomic_Interval[M\$Repeatclass==repclass],M\$Hety_percent[M\$Repeatclass==repclass],axes=FALSE,ylim=c(0,max(M\$Hety_percent[M\$Repeatclass==repclass],na.rm=TRUE)),xlim=c(0,max(M\$Atomic_Interval[M\$Repeatclass==repclass],na.rm=TRUE)),type=\"l\",main=repclass,xlab=\"Atomic Interval\",ylab=\"\",col=\"black\")
+axis(1, xlim=c(0,max(M\$Atomic_Interval[M\$Repeatclass==repclass],na.rm=TRUE)),col=\"black\",las=1)
+axis(2, ylim=c(0,max(M\$Hety_percent[M\$Repeatclass==repclass],na.rm=TRUE)),col=\"black\",las=1)
+mtext(\"hety %\",side=2,line=2.5)
+box()
+par(new=TRUE)
+plot(M\$Atomic_Interval[M\$Repeatclass==repclass],M\$Ts.Tv_ratio[M\$Repeatclass==repclass],axes=FALSE,ylim=c(0,max(M\$Ts.Tv_ratio[M\$Repeatclass==repclass],na.rm=TRUE)),type=\"l\",xlab=\"\",ylab=\"\",col=\"red\")
+mtext(\"Ts/Tv\",side=4,col=\"red\",line=2.5)
+axis(4, ylim=c(0,max(M\$Ts.Tv_ratio[M\$Repeatclass==repclass]),na.rm=TRUE),col=\"red\",col.axis=\"red\",las=1)
+}
+dev.off()
+
+pdf(paste(args[1],\".rep_tstv.s50.pdf\",sep=\"\"),height=15,width=20)
+par(mfrow=c(4,5))
+N <- O_s50[is.finite(O_s50\$Ts.Tv_ratio),]
+N <- N[is.finite(N\$Hety_percent),]
+M <- N[order(N\$Atomic_Interval),]
+colcount<-1
+for (repclass in unique(M\$Repeatclass)) {
+colcount<-colcount+1
+par(mar = c(6, 4, 4, 6))
+plot(M\$Atomic_Interval[M\$Repeatclass==repclass],M\$Hety_percent[M\$Repeatclass==repclass],axes=FALSE,ylim=c(0,max(M\$Hety_percent[M\$Repeatclass==repclass],na.rm=TRUE)),xlim=c(0,max(M\$Atomic_Interval[M\$Repeatclass==repclass],na.rm=TRUE)),type=\"l\",main=repclass,xlab=\"Atomic Interval\",ylab=\"\",col=\"black\")
+axis(1, xlim=c(0,max(M\$Atomic_Interval[M\$Repeatclass==repclass],na.rm=TRUE)),col=\"black\",las=1)
+axis(2, ylim=c(0,max(M\$Hety_percent[M\$Repeatclass==repclass],na.rm=TRUE)),col=\"black\",las=1)
+mtext(\"hety %\",side=2,line=2.5)
+box()
+par(new=TRUE)
+plot(M\$Atomic_Interval[M\$Repeatclass==repclass],M\$Ts.Tv_ratio[M\$Repeatclass==repclass],axes=FALSE,ylim=c(0,max(M\$Ts.Tv_ratio[M\$Repeatclass==repclass],na.rm=TRUE)),type=\"l\",xlab=\"\",ylab=\"\",col=\"red\")
+mtext(\"Ts/Tv\",side=4,col=\"red\",line=2.5)
+axis(4, ylim=c(0,max(M\$Ts.Tv_ratio[M\$Repeatclass==repclass]),na.rm=TRUE),col=\"red\",col.axis=\"red\",las=1)
+}
+dev.off()
+
+pdf(paste(args[1],\".rep_tstv.s20.pdf\",sep=\"\"),height=15,width=20)
+par(mfrow=c(4,5))
+N <- O_s20[is.finite(O_s20\$Ts.Tv_ratio),]
+N <- N[is.finite(N\$Hety_percent),]
+M <- N[order(N\$Atomic_Interval),]
+colcount<-1
+for (repclass in unique(M\$Repeatclass)) {
+colcount<-colcount+1
+par(mar = c(6, 4, 4, 6))
+plot(M\$Atomic_Interval[M\$Repeatclass==repclass],M\$Hety_percent[M\$Repeatclass==repclass],axes=FALSE,ylim=c(0,max(M\$Hety_percent[M\$Repeatclass==repclass],na.rm=TRUE)),xlim=c(0,max(M\$Atomic_Interval[M\$Repeatclass==repclass],na.rm=TRUE)),type=\"l\",main=repclass,xlab=\"Atomic Interval\",ylab=\"\",col=\"black\")
+axis(1, xlim=c(0,max(M\$Atomic_Interval[M\$Repeatclass==repclass],na.rm=TRUE)),col=\"black\",las=1)
+axis(2, ylim=c(0,max(M\$Hety_percent[M\$Repeatclass==repclass],na.rm=TRUE)),col=\"black\",las=1)
+mtext(\"hety %\",side=2,line=2.5)
+box()
+par(new=TRUE)
+plot(M\$Atomic_Interval[M\$Repeatclass==repclass],M\$Ts.Tv_ratio[M\$Repeatclass==repclass],axes=FALSE,ylim=c(0,max(M\$Ts.Tv_ratio[M\$Repeatclass==repclass],na.rm=TRUE)),type=\"l\",xlab=\"\",ylab=\"\",col=\"red\")
+mtext(\"Ts/Tv\",side=4,col=\"red\",line=2.5)
+axis(4, ylim=c(0,max(M\$Ts.Tv_ratio[M\$Repeatclass==repclass]),na.rm=TRUE),col=\"red\",col.axis=\"red\",las=1)
+}
+dev.off()
+
+
+#######################################################################################################################################
+########################################  FUNCTION TO TRANSFORM MATRIX  ###############################################################
+#######################################################################################################################################
+data.frame2matrix = function(data, rowtitle, coltitle, datatitle, 
+                             rowdecreasing = FALSE, coldecreasing = FALSE,
+                             default_value = NA) {
+
+  # check, whether titles exist as columns names in the data.frame data
+  if ( (!(rowtitle%in%names(data))) 
+       || (!(coltitle%in%names(data))) 
+       || (!(datatitle%in%names(data))) ) {
+    stop('data.frame2matrix: bad row-, col-, or datatitle.')
+  }
+
+  # get number of rows in data
+  ndata = dim(data)[1]
+
+  # extract rownames and colnames for the matrix from the data.frame
+  rownames = sort(unique(data[[rowtitle]]), decreasing = rowdecreasing)
+  nrows = length(rownames)
+  colnames = sort(unique(data[[coltitle]]), decreasing = coldecreasing)
+  ncols = length(colnames)
+
+  # initialize the matrix
+  out_matrix = matrix(NA, 
+                      nrow = nrows, ncol = ncols,
+                      dimnames=list(rownames, colnames))
+
+  # iterate rows of data
+  for (i1 in 1:ndata) {
+    # get matrix-row and matrix-column indices for the current data-row
+    iR = which(rownames==data[[rowtitle]][i1])
+    iC = which(colnames==data[[coltitle]][i1])
+
+    # throw an error if the matrix entry (iR,iC) is already filled.
+    if (!is.na(out_matrix[iR, iC])) stop('data.frame2matrix: double entry in data.frame')
+    out_matrix[iR, iC] = data[[datatitle]][i1]
+  }
+
+  # set empty matrix entries to the default value
+  out_matrix[is.na(out_matrix)] = default_value
+
+  # return matrix
+  return(out_matrix)
+
+}
+#######################################################################################################################################
+
+#########################################################################################################################################
+####################################### INTERVAL WISE REPEAT DISTRIBUTION ###############################################################
+#########################################################################################################################################
+
+temp_s20 = list.files(\"s20\",pattern=\".rc.bed\",full.names=TRUE)
+temp_s50 = list.files(\"s50\",pattern=\".rc.bed\",full.names=TRUE)
+temp_s100 = list.files(\"s100\",pattern=\".rc.bed\",full.names=TRUE)
+rep_col <- c(\"plum1\",\"hotpink\",\"darkolivegreen\",\"peru\",\"olivedrab1\",\"orange2\",\"darkseagreen1\",\"palevioletred1\",\"navy\",\"khaki\",\"gray50\",\"cornflowerblue\",\"yellowgreen\",\"chartreuse4\",\"cadetblue4\",\"burlywood4\",\"brown4\",\"blueviolet\",\"bisque4\",\"aquamarine1\",\"aquamarine3\",\"aquamarine4\",\"azure3\",\"azure4\",\"brown3\",\"burlywood3\",\"cadetblue2\",\"chartreuse1\",\"chocolate2\",\"coral\",\"coral2\",\"coral3\",\"coral4\",\"cornsilk4\",\"cyan3\",\"cyan4\",\"darkblue\",\"darkgoldenrod2\",\"darkgoldenrod4\",\"darkmagenta\")
+unlink(\"s20_AI_perc.txt\")
+for (i in temp_s20){
+read.table(file=i,header=FALSE)-> rc
+rc\$V3-rc\$V2 -> rc\$diff
+as.data.frame(aggregate(rc\$diff,list(rc\$V4),sum))-> aggr_rc
+aggr_rc\$percent_cont <- (aggr_rc\$x/sum(aggr_rc\$x))*100
+data.frame(Percent=aggr_rc\$percent_cont,Rep_class=aggr_rc\$Group.1,atomInt=sapply(strsplit(sapply(strsplit(i,\"[.]\"), \`[\`, 1),\"[/]\"), \`[\`, 2),length(aggr_rc\$Group.1))->X
+write.table(file=\"s20_AI_perc.txt\",X,row.names=FALSE,col.names=FALSE,sep=\"\t\",quote=FALSE,append=TRUE)
+}
+read.table(file=\"s20_AI_perc.txt\",header=FALSE)->M
+myMatrix = data.frame2matrix(M, 'V2', 'V3', 'V1')
+myMatrix[is.na(myMatrix)] <- 0
+pdf(\"s20_AI_perc.pdf\",height=15,width=20)
+par(mar = c(15,4.1, 3.1, 3.1),xpd=TRUE)
+barplot(myMatrix, col=rep_col, main=\"Percent of intervals covered by repeat classes\",xlab=\"Atomic Interval\",ylab=\"Abundance\",font.lab=2,cex.lab=1.2,cex.main=1.5)
+legend(\"bottom\", inset=c(0,-0.25),legend=c(row.names(myMatrix)),fill=rep_col,ncol = 6, border=NA,box.lty=2,cex=1.3)
+dev.off()
+unlink(\"s50_AI_perc.txt\")
+for (i in temp_s50){
+read.table(file=i,header=FALSE)-> rc
+rc\$V3-rc\$V2 -> rc\$diff
+as.data.frame(aggregate(rc\$diff,list(rc\$V4),sum))-> aggr_rc
+aggr_rc\$percent_cont <- (aggr_rc\$x/sum(aggr_rc\$x))*100
+data.frame(Percent=aggr_rc\$percent_cont,Rep_class=aggr_rc\$Group.1,atomInt=sapply(strsplit(sapply(strsplit(i,\"[.]\"), \`[\`, 1),\"[/]\"), \`[\`, 2),length(aggr_rc\$Group.1))->X
+write.table(file=\"s50_AI_perc.txt\",X,row.names=FALSE,col.names=FALSE,sep=\"\t\",quote=FALSE,append=TRUE)
+}
+read.table(file=\"s50_AI_perc.txt\",header=FALSE)->M
+myMatrix = data.frame2matrix(M, 'V2', 'V3', 'V1')
+myMatrix[is.na(myMatrix)] <- 0
+pdf(\"s50_AI_perc.pdf\",height=15,width=20)
+par(mar = c(15,4.1, 3.1, 3.1),xpd=TRUE)
+barplot(myMatrix, col=rep_col, main=\"Percent of intervals covered by repeat classes\",xlab=\"Atomic Interval\",ylab=\"Abundance\",font.lab=2,cex.lab=1.2,cex.main=1.5)
+legend(\"bottom\", inset=c(0,-0.25),legend=c(row.names(myMatrix)),fill=rep_col,ncol = 6, border=NA,box.lty=2,cex=1.3)
+dev.off()
+unlink(\"s100_AI_perc.txt\")
+for (i in temp_s100){
+read.table(file=i,header=FALSE)-> rc
+rc\$V3-rc\$V2 -> rc\$diff
+as.data.frame(aggregate(rc\$diff,list(rc\$V4),sum))-> aggr_rc
+aggr_rc\$percent_cont <- (aggr_rc\$x/sum(aggr_rc\$x))*100
+data.frame(Percent=aggr_rc\$percent_cont,Rep_class=aggr_rc\$Group.1,atomInt=sapply(strsplit(sapply(strsplit(i,\"[.]\"), \`[\`, 1),\"[/]\"), \`[\`, 2),length(aggr_rc\$Group.1))->X
+write.table(file=\"s100_AI_perc.txt\",X,row.names=FALSE,col.names=FALSE,sep=\"\t\",quote=FALSE,append=TRUE)
+}
+read.table(file=\"s100_AI_perc.txt\",header=FALSE)->M
+myMatrix = data.frame2matrix(M, 'V2', 'V3', 'V1')
+myMatrix[is.na(myMatrix)] <- 0
+pdf(\"s100_AI_perc.pdf\",height=15,width=20)
+par(mar = c(15,4.1, 3.1, 3.1),xpd=TRUE)
+barplot(myMatrix, col=rep_col, main=\"Percent of intervals covered by repeat classes\",xlab=\"Atomic Interval\",ylab=\"Abundance\",font.lab=2,cex.lab=1.2,cex.main=1.5)
+legend(\"bottom\", inset=c(0,-0.25),legend=c(row.names(myMatrix)),fill=rep_col,ncol = 6, border=NA,box.lty=2,cex=1.3)
+dev.off()
+#########################################################################################################################################
+################################# GENOMEWIDE REPEAT DISTRIBUTION ACROSS INTERVALS #######################################################
+#########################################################################################################################################
+
+unlink(\"s20_AI_perc_geno.txt\")
+for (i in temp_s20){
+read.table(file=i,header=FALSE)-> rc
+rc\$V3-rc\$V2 -> rc\$diff
+as.data.frame(aggregate(rc\$diff,list(rc\$V4),sum))-> aggr_rc
+aggr_rc\$percent_geno <- (aggr_rc\$x/1.01e8)*100
+data.frame(Percent=aggr_rc\$percent_geno,Rep_class=aggr_rc\$Group.1,atomInt=sapply(strsplit(sapply(strsplit(i,\"[.]\"), \`[\`, 1),\"[/]\"), \`[\`, 2),length(aggr_rc\$Group.1))->Y
+write.table(file=\"s20_AI_perc_geno.txt\",Y,row.names=FALSE,col.names=FALSE,sep=\"\t\",quote=FALSE,append=TRUE)
+}
+read.table(file=\"s20_AI_perc_geno.txt\",header=FALSE)-> R
+genMatrix = data.frame2matrix(R, 'V2', 'V3', 'V1')
+genMatrix[is.na(genMatrix)] <- 0
+pdf(\"s20_AI_perc_geno.pdf\",height=15,width=20)
+par(mar = c(15, 4.1, 3.1, 3.1),xpd=TRUE)
+barplot(genMatrix, col=rep_col, main=\"Percent of genome covered by intervals and repeat classes\",xlab=\"Atomic Interval\",ylab=\"genome percent\",font.lab=2,cex.lab=1.2,cex.main=1.5)
+box()
+legend(\"bottom\", inset=c(0,-0.25),legend=c(row.names(genMatrix)),fill=rep_col,ncol = 6, border=NA,box.lty=2,cex=1.3)
+dev.off()
+
+unlink(\"s50_AI_perc_geno.txt\")
+for (i in temp_s50){
+read.table(file=i,header=FALSE)-> rc
+rc\$V3-rc\$V2 -> rc\$diff
+as.data.frame(aggregate(rc\$diff,list(rc\$V4),sum))-> aggr_rc
+aggr_rc\$percent_geno <- (aggr_rc\$x/1.01e8)*100
+data.frame(Percent=aggr_rc\$percent_geno,Rep_class=aggr_rc\$Group.1,atomInt=sapply(strsplit(sapply(strsplit(i,\"[.]\"), \`[\`, 1),\"[/]\"), \`[\`, 2),length(aggr_rc\$Group.1))->Y
+write.table(file=\"s50_AI_perc_geno.txt\",Y,row.names=FALSE,col.names=FALSE,sep=\"\t\",quote=FALSE,append=TRUE)
+}
+read.table(file=\"s50_AI_perc_geno.txt\",header=FALSE)-> R
+genMatrix = data.frame2matrix(R, 'V2', 'V3', 'V1')
+genMatrix[is.na(genMatrix)] <- 0
+pdf(\"s50_AI_perc_geno.pdf\",height=15,width=20)
+par(mar = c(15, 4.1, 3.1, 3.1),xpd=TRUE)
+barplot(genMatrix, col=rep_col, main=\"Percent of genome covered by intervals and repeat classes\",xlab=\"Atomic Interval\",ylab=\"genome percent\",font.lab=2,cex.lab=1.2,cex.main=1.5)
+box()
+legend(\"bottom\", inset=c(0,-0.25),legend=c(row.names(genMatrix)),fill=rep_col,ncol = 6, border=NA,box.lty=2,cex=1.3)
+dev.off()
+
+
+unlink(\"s100_AI_perc_geno.txt\")
+for (i in temp_s100){
+read.table(file=i,header=FALSE)-> rc
+rc\$V3-rc\$V2 -> rc\$diff
+as.data.frame(aggregate(rc\$diff,list(rc\$V4),sum))-> aggr_rc
+aggr_rc\$percent_geno <- (aggr_rc\$x/1.01e8)*100
+data.frame(Percent=aggr_rc\$percent_geno,Rep_class=aggr_rc\$Group.1,atomInt=sapply(strsplit(sapply(strsplit(i,\"[.]\"), \`[\`, 1),\"[/]\"), \`[\`, 2),length(aggr_rc\$Group.1))->Y
+write.table(file=\"s100_AI_perc_geno.txt\",Y,row.names=FALSE,col.names=FALSE,sep=\"\t\",quote=FALSE,append=TRUE)
+}
+read.table(file=\"s100_AI_perc_geno.txt\",header=FALSE)-> R
+genMatrix = data.frame2matrix(R, 'V2', 'V3', 'V1')
+genMatrix[is.na(genMatrix)] <- 0
+pdf(\"s100_AI_perc_geno.pdf\",height=15,width=20)
+par(mar = c(15, 4.1, 3.1, 3.1),xpd=TRUE)
+barplot(genMatrix, col=rep_col, main=\"Percent of genome covered by intervals and repeat classes\",xlab=\"Atomic Interval\",ylab=\"genome percent\",font.lab=2,cex.lab=1.2,cex.main=1.5)
+box()
+legend(\"bottom\", inset=c(0,-0.25),legend=c(row.names(genMatrix)),fill=rep_col,ncol = 6, border=NA,box.lty=2,cex=1.3)
+dev.off()
+
+
+#######################################################################################################################################
+############################### Plotting Lengths of sequences across Atomic Intervals #################################################
+#######################################################################################################################################
+
+rlen_s20 = list.files(\"s20\",pattern=\".lengths\",full.names=TRUE)
+rlen_s50 = list.files(\"s50\",pattern=\".lengths\",full.names=TRUE)
+rlen_s100 = list.files(\"s100\",pattern=\".lengths\",full.names=TRUE)
+rlen_repclass = list.files(\"repclass\",pattern=\".lengths\",full.names=TRUE) 
+
+for (i in rlen_s20){
+read.table(file=i,header=FALSE)-> M
+gsub(\"lengths\", \"RepLength\",i)-> j
+pdf(paste(j,\"_s20.pdf\",sep=\"\"),width=15,height=20)
+boxplot(M\$V2~M\$V1,log=\"y\",main=i,xlab=\"Atomic Intervals\",ylab=\"log(Lengths)\",font.lab=2,cex.lab=1.2,cex.main=1.5)
+box()
+}
+dev.off()
+
+for (i in rlen_s50){
+read.table(file=i,header=FALSE)-> M
+gsub(\"lengths\", \"RepLength\",i)-> j
+pdf(paste(j,\"_s50.pdf\",sep=\"\"),width=15,height=20)
+boxplot(M\$V2~M\$V1,log=\"y\",main=i,xlab=\"Atomic Intervals\",ylab=\"log(Lengths)\",font.lab=2,cex.lab=1.2,cex.main=1.5)
+box()
+}
+dev.off()
+
+for (i in rlen_s100){
+read.table(file=i,header=FALSE)-> M
+gsub(\"lengths\", \"RepLength\",i)-> j
+pdf(paste(j,\"_s100.pdf\",sep=\"\"),width=15,height=20)
+boxplot(M\$V2~M\$V1,log=\"y\",main=i,xlab=\"Atomic Intervals\",ylab=\"log(Lengths)\",font.lab=2,cex.lab=1.2,cex.main=1.5)
+box()
+}
+dev.off()
+
+pdf(\"RepLength_repclass.pdf\",width=15,height=20)
+par(mfrow=c(2,2))
+for (i in rlen_repclass){
+read.table(file=i,header=FALSE)-> M
+repc <- sapply(strsplit(sapply(strsplit(i,\"[.]\"), \`[\`, 1),\"[/]\"), \`[\`, 2)
+boxplot(M\$V2~M\$V1,log=\"y\",main=repc,xlab=\"Atomic Intervals\",ylab=\"log(Lengths)\",font.lab=2,cex.lab=1.2,cex.main=1.5)
+box()
+}
+dev.off()
+
+
+#######################################################################################################################################
+################################### Plotting No. of recombinations across Atomic Intervals ############################################
+#######################################################################################################################################
+
+nrec_s20 = list.files(\"s20\",pattern=\".nrec\",full.names=TRUE)
+nrec_s50 = list.files(\"s50\",pattern=\".nrec\",full.names=TRUE)
+nrec_s100 = list.files(\"s100\",pattern=\".nrec\",full.names=TRUE)
+nrec_repclass = list.files(\"repclass\",pattern=\".nrec\",full.names=TRUE)
+
+for (i in nrec_s20){
+read.table(file=i,header=FALSE)-> M
+gsub(\"nrec\", \"nrcomb\",i)-> j
+ai<-length(pt_un_s20\$V1)
+length(M\$V1)/ai->itercount
+t(matrix(M\$V1,nrow = ai,ncol = itercount))->N
+pdf(paste(j,\"_RecQC.pdf\",sep=\"\"),width=15,height=20)
+par(mfrow=c(4,4))
+for(itK in c(1:ai)){
+barplot(N[,itK],names.arg=c(0:25),main=itK,ylab=\"No.of recombinations\",xlab=\"No .of iteration\",font.lab=2,cex.lab=1.2,cex.main=1.5)
+abline(h=10,col=\"red\",lwd=2)
+box()
+}
+dev.off()
+}
+
+for (i in nrec_s50){
+read.table(file=i,header=FALSE)-> M
+gsub(\"nrec\", \"nrcomb\",i)-> j
+ai<-length(pt_un_s50\$V1)
+length(M\$V1)/ai->itercount
+t(matrix(M\$V1,nrow = ai,ncol = itercount))->N
+pdf(paste(j,\"_RecQC.pdf\",sep=\"\"),width=15,height=20)
+par(mfrow=c(4,4))
+for(itK in c(1:ai)){
+barplot(N[,itK],names.arg=c(0:25),main=itK,ylab=\"No.of recombinations\",xlab=\"No .of iteration\",font.lab=2,cex.lab=1.2,cex.main=1.5)
+abline(h=10,col=\"red\",lwd=2)
+box()
+}
+dev.off()
+}
+
+for (i in nrec_s100){
+read.table(file=i,header=FALSE)-> M
+gsub(\"nrec\", \"nrcomb\",i)-> j
+ai<-length(pt_un_s100\$V1)
+length(M\$V1)/ai->itercount
+t(matrix(M\$V1,nrow = ai,ncol = itercount))->N
+pdf(paste(j,\"_RecQC.pdf\",sep=\"\"),width=15,height=20)
+par(mfrow=c(4,4))
+for(itK in c(1:ai)){
+barplot(N[,itK],names.arg=c(0:25),main=itK,ylab=\"No.of recombinations\",xlab=\"No .of iteration\",font.lab=2,cex.lab=1.2,cex.main=1.5)
+abline(h=10,col=\"red\",lwd=2)
+box()
+}
+dev.off()
+}
+
+for (i in nrec_repclass){
+read.table(file=i,header=FALSE)-> M
+gsub(\"nrec\", \"nrcomb\",i)-> j
+ai<-length(pt_un_s100\$V1)
+length(M\$V1)/ai->itercount
+t(matrix(M\$V1,nrow = ai,ncol = itercount))->N
+pdf(paste(j,\"_RecQC.pdf\",sep=\"\"),width=15,height=20)
+par(mfrow=c(4,4))
+for(itK in c(1:ai)){
+barplot(N[,itK],names.arg=c(0:25),main=itK,ylab=\"No.of recombinations\",xlab=\"No .of iteration\",font.lab=2,cex.lab=1.2,cex.main=1.5)
+abline(h=10,col=\"red\",lwd=2)
+box()
+}
+dev.off()
+}
+########################################################################################################################################
+" > batch1.r
+
+echo "Rscript batch1.r $ind.$prefix $mutr $Time $gen_size"
+Rscript batch1.r $ind.$prefix $mutr $Time $gen_size
+
+mkdir results
+mv */*.pdf results/
+mv *.pdf results/
+cd results
+mkdir Recomb_events
+mv *.nrcomb*.pdf Recomb_events/
+mkdir Repeat_correlation
+mv *correlation*.pdf Repeat_correlation/
+mkdir Repeat_length
+mv *RepLength*.pdf Repeat_length/
+mkdir PSMC_plots
+mv *repeat_effect*.pdf PSMC_plots/
+mv *repclass_PSMC*.pdf PSMC_plots/
+mkdir Ts_Tv
+mv *tstv*.pdf Ts_Tv/
+mkdir Repeat_Distribution_in_AI
+mv *perc*.pdf Repeat_Distribution_in_AI/
+echo "Finished running Coalrep"
