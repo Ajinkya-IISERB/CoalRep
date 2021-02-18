@@ -11,7 +11,7 @@ You will need all these tools installed and available in the path.
 - MSMC 
 - MSMC-TOOLS
 - R</pre></code>
-
+Add mod_dec.pl file to the path and make sure it is available globally on the PC. 
   
 <h2>Step 1: Repeat Identification and creating input for repeat analysis. </h2>
 
