@@ -1,6 +1,18 @@
 # CoalRep
 <h1> Evaluating the impact of repetitive elements during coalescent demographic inferences. </h1>
 
+<h2> Third party tools required- </h2>
+You will need all these tools installed and available in the path.
+SAMTOOLS
+BCFTOOLS
+BEDTOOLS
+PSMC
+SEQTK
+MSMC 
+MSMC-TOOLS
+R
+
+  
 <h2>Step 1: Repeat Identification and creating input for repeat analysis. </h2>
 
 #Download the repeat masker output file from NCBI (or generate your own by running repeat masker).
