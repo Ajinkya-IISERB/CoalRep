@@ -59,7 +59,6 @@ echo "Mapping finished"
 mapper=`awk 'NR == 5' $prefix/$prefix.sort.bam.txt | awk '{print $5}' | sed 's/[()]//g'`
 echo "The mapped percentage for this assembly is $mapper ."
 echo "Now, calculating coverage."
-samtools depth --reference $prefix/$prefix.un $prefix/$prefix.sort.bam > $prefix/$prefix.coverage
-awk '{sum += $3} END {print sum / NR}' $prefix/$prefix.coverage > $prefix/$prefix.meancov
+samtools depth --reference $prefix/$prefix.un $prefix/$prefix.sort.bam | awk '{sum += $3} END {print sum / NR}' > $prefix/$prefix.meancov
 meancov=`cat $prefix/$prefix.meancov`
 echo "The mean coverage of reads is $meancov"
