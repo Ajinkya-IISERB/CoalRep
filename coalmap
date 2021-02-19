@@ -1,0 +1,65 @@
+#!/bin/bash
+helpFunction()
+{
+   echo ""
+   echo "Usage: coalmap -g genome -f fastqread1 -r fastqread2 -p prefix -n threads"
+   echo -e "\t-g Genome fasta file"
+   echo -e "\t-f Fastq read 1 file"
+   echo -e "\t-r Fastq read 2 file"
+   echo -e "\t-p output prefix"
+   echo -e "\t-n Number of threads to use"
+exit 1
+}
+while getopts ":g:f:r:p:n:" opt
+do
+case "$opt" in
+g ) fasta="$OPTARG" ;;
+f ) fastqread1="$OPTARG" ;;
+r ) fastqread2="$OPTARG" ;;
+p ) prefix="$OPTARG" ;;
+n ) threads="$OPTARG" ;;
+? ) helpFunction ;;
+esac
+done
+##Mandatory arguments
+if [[ -z "$fasta" ]] || [[ -z "$fastqread1" ]] || [[ -z "$fastqread2" ]] || [[ -z "$prefix" ]]
+then
+ echo "Please provide all input options";
+ helpFunction
+ echo $fasta
+ echo $fastqread1
+ echo $fastqread2
+ echo $prefix
+fi
+##Optional arguments
+defn="1"
+if [ -z "$threads" ]
+then
+echo "Using default value of $defn for it."
+threads=$defn
+fi
+mkdir $prefix
+genlen=`grep -v "^>" $fasta | wc -c`
+Nseqs=`grep -v "^>" $fasta | tr -cd N | wc -c`
+Npercent=`echo $genlen $Nseqs | awk '{print $2/$1*100}'`
+echo "Percent of N's or hardmasked bases is $Npercent ."
+echo "Analysis will be performed by using this fasta file but make sure you are not using hardmasked genome ."
+perl -pe '/^[^>]/ and $_=uc' $fasta > $prefix/$prefix.un
+bwa index $prefix/$prefix.un
+samtools faidx $prefix/$prefix.un
+cut -f 1-2 $prefix/$prefix.un.fai | sort -k1,1 -k2n,2 > $prefix/$prefix.un.genome
+echo "Now, mapping the reads to the reference genome."
+bwa mem -t $threads $prefix/$prefix.un $fastqread1 $fastqread2 > $prefix/$prefix.sam
+samtools view -@ $threads -bhS $prefix/$prefix.sam > $prefix/$prefix.bam
+samtools sort -@ $threads $prefix/$prefix.bam -o $prefix/$prefix.sort.bam
+samtools index $prefix/$prefix.sort.bam
+samtools flagstat -@ $threads $prefix/$prefix.sort.bam > $prefix/$prefix.sort.bam.txt
+rm $prefix/$prefix.sam $prefix/$prefix.bam
+echo "Mapping finished"
+mapper=`awk 'NR == 5' $prefix/$prefix.sort.bam.txt | awk '{print $5}' | sed 's/[()]//g'`
+echo "The mapped percentage for this assembly is $mapper ."
+echo "Now, calculating coverage."
+samtools depth --reference $prefix/$prefix.un $prefix/$prefix.sort.bam > $prefix/$prefix.coverage
+awk '{sum += $3} END {print sum / NR}' $prefix/$prefix.coverage > $prefix/$prefix.meancov
+meancov=`cat $prefix/$prefix.meancov`
+echo "The mean coverage of reads is $meancov"
