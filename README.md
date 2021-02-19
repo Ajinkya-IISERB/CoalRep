@@ -19,18 +19,15 @@ You will need all these tools installed and available in the path.
 
 <p>As an example, we will download the genome assembly of the *Populus trichocarpa* from the NCBI website and use the publicly available short read data from the SRA dataset.</p>
 <p>#Download genome reference file<pre><code><br />wget https://ftp.ncbi.nlm.nih.gov/genomes/all/GCF/000/002/775/GCF_000002775.4_Pop_tri_v3/GCF_000002775.4_Pop_tri_v3_genomic.fna.gz </code></pre>
-<p>#Uncompress the reference fasta file<pre><code><br />
-gzip -d GCF_000002775.4_Pop_tri_v3_genomic.fna.gz</code></pre></p>
-
+<p>#Uncompress the reference fasta file<pre><code><br />gzip -d GCF_000002775.4_Pop_tri_v3_genomic.fna.gz</code></pre></p>
 <p>#Download short read data files<pre> <code><br />wget <a href="ftp://ftp.sra.ebi.ac.uk/vol1/fastq/SRR625/009/SRR6256359/SRR6256359_1.fastq.gz">ftp://ftp.sra.ebi.ac.uk/vol1/fastq/SRR625/009/SRR6256359/SRR6256359_1.fastq.gz</a></code></pre></p>
 <pre><code><br />wget <a href="ftp://ftp.sra.ebi.ac.uk/vol1/fastq/SRR625/009/SRR6256359/SRR6256359_2.fastq.gz">ftp://ftp.sra.ebi.ac.uk/vol1/fastq/SRR625/009/SRR6256359/SRR6256359_2.fastq.gz</a></code></pre></p>
-<p>#Use coalmap command to index the genome and map the short read data.<pre>
-<code><br />
+<p>#Use coalmap command to index the genome and map the short read data.<pre><code><br />
 coalmap -g GCF_000002775.4_Pop_tri_v3_genomic.fna -f SRR6256359_1.fastq.gz -r SRR6256359_2.fastq.gz -p pt -n 24
 </code></pre></p>
 
 The following information about the genome assembly used and percent of reads mapped to the genome are reported.
-<code>
+<pre><code>
 <p>Percent of N's or hardmasked bases is 0.</p>
 <p>Analysis will be performed by using this fasta file but make sure you are not using hardmasked genome.<p>
 <p>Now, mapping the reads to the reference genome.</p>
@@ -38,7 +35,7 @@ The following information about the genome assembly used and percent of reads ma
 <p>The mapped percentage for this assembly is 98.91%.</p>
 <p>Now, calculating coverage.</p>
 <p>The mean coverage of reads is 27.1474</p>
-</code>
+</pre></code>
 <h2>Step 2: Repeat Identification and creating input for repeat analysis. </h2>
 
 #Download the repeat masker output file from NCBI (or generate your own by running repeat masker).
