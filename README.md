@@ -22,10 +22,8 @@ You will need all these tools installed and available in the path.
 <p>#Uncompress the reference fasta file<pre><code><br />
 gzip -d GCF_000002775.4_Pop_tri_v3_genomic.fna.gz</code></pre></p>
 
-<p>#Download short read data files<pre> 
-<code><br />wget <a href="ftp://ftp.sra.ebi.ac.uk/vol1/fastq/SRR625/009/SRR6256359/SRR6256359_1.fastq.gz">ftp://ftp.sra.ebi.ac.uk/vol1/fastq/SRR625/009/SRR6256359/SRR6256359_1.fastq.gz</a></code></pre></p>
-<pre>
-<code><br />wget <a href="ftp://ftp.sra.ebi.ac.uk/vol1/fastq/SRR625/009/SRR6256359/SRR6256359_2.fastq.gz">ftp://ftp.sra.ebi.ac.uk/vol1/fastq/SRR625/009/SRR6256359/SRR6256359_2.fastq.gz</a></code></pre></p>
+<p>#Download short read data files<pre> <code><br />wget <a href="ftp://ftp.sra.ebi.ac.uk/vol1/fastq/SRR625/009/SRR6256359/SRR6256359_1.fastq.gz">ftp://ftp.sra.ebi.ac.uk/vol1/fastq/SRR625/009/SRR6256359/SRR6256359_1.fastq.gz</a></code></pre></p>
+<pre><code><br />wget <a href="ftp://ftp.sra.ebi.ac.uk/vol1/fastq/SRR625/009/SRR6256359/SRR6256359_2.fastq.gz">ftp://ftp.sra.ebi.ac.uk/vol1/fastq/SRR625/009/SRR6256359/SRR6256359_2.fastq.gz</a></code></pre></p>
 <p>#Use coalmap command to index the genome and map the short read data.<pre>
 <code><br />
 coalmap -g GCF_000002775.4_Pop_tri_v3_genomic.fna -f SRR6256359_1.fastq.gz -r SRR6256359_2.fastq.gz -p pt -n 24
