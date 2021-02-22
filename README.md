@@ -99,7 +99,7 @@ If you get this output at the end that means your run was successful and the res
 The results directory will have 6 subdirectories: 1.PSMC_plots, 2.Recomb_events, 3.Repeat_correlation, 
 4.Repeat_Distribution_in_AI, 5.Repeat_length and 6.Ts_Tv.
 
-1. PSMC_plots directory:
+<h3>1. PSMC_plots directory:</h3>
 PSMC trajectories differ due to inclusion/exclusion of repeats. Extent of change in trajectories due to these repeats are
 assessed in these plots. PSMC plots showing repeat content across atomic intervals, and comparative msmc inferred curves.
 Filename strucure is followed like this: {bamfile}.{prefix}_repeat_effect_{bin_size}.pdf for masked/unmasked psmc runs and
@@ -108,7 +108,7 @@ File ending with repclass_PSMC_s100.pdf will have PSMC plot having all the repea
 comparative differences due to inclusion of each repeat class during PSMC analyses.
 There should be 5 plots, one for each bin sizes, one combined and one for repeat classes.
 
-2. Recomb_events directory:
+<h3>2. Recomb_events directory:</h3>
 Occurance of sufficient number of recombinations in each atomic interval after 20th interval is one of the necessities 
 for accurate coalescent inferrence in PSMC. These plots will show if there are sufficient number of recombiantions for 
 your PSMC runs. 
@@ -118,21 +118,21 @@ Filename structure for masked and unmasked genomes PSMC runs is followed like th
 For repeat class PSMC runs filemname structure is followed like this: {repeat_class}.nrcomb_RecQC.pdf.
 There will be 6 plots for masked/unmasked PSMC runs and equal number of plots corresponding to repeat classes.
 
-3. Repeat_Correlation directory:
+<h3>3. Repeat_Correlation directory:</h3>
 Correlation for repeat content in atomic intervals with differences in Effective population sizes (Ne) is tested using 
 regression and Kendall's correlation test. If repeats are really affecting the PSMC inferrence, this correlation should 
 be high.
 Filename structure is followed like this: {bamfile}.{prefix}_correlation_repeat_{bin_size}.pdf.
 In total 4 plots should be there.
 
-4. Repeat_Distribution_in_AI directory:
+<h3>4. Repeat_Distribution_in_AI directory:</h3>
 Contribution or abundance of repeat classes across intervals in each interval and across genome is shown to better
 assess which repeat classes have higher contribution to that atomic interval.
 Filename structure is followed like this: {bin_size}.AI_perc.pdf for abundance in each interval 
 and {bin_size}.AI_perc_geno.pdf for abundance across genome.
 In total there should be 6 plots, 2 for each bin size.
 
-5. Repeat_length directory:
+<h3>5. Repeat_length directory:</h3>
 Lengths of sequences used for inference of Ne in each atomic interval varies. The distribution of lengths of sequences 
 across atomic intervals is plotted for each PSMC run. 
 Filename structure for masked/unmasked PSMC is followed like this: 
@@ -140,7 +140,7 @@ Filename structure for masked/unmasked PSMC is followed like this:
 and for repeat class PSMC runs a single file RepLength_repclass.pdf will be produced.
 In total there should be 7 plots, 2 for each bin size and one for repeats.
 
-#6. Ts_Tv directory:
+</h3>6. Ts_Tv directory:</h3>
 Heterozygosity and Ts/Tv ratio of corresponding atomic interval is calculated and plotted. 
 Distribution of heterozygosity is expected to increase across intervals in increasing order of atomic itervals but 
 corresponding Ts/Tv values should be randomly distributed.
