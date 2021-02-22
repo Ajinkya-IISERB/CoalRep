@@ -94,11 +94,7 @@ Finished running Coalrep
 </pre></code>
 If you get this output at the end that means your run was successful and the results are produced and already kept in the results folder for your observation. In results folder there would be 6 folder namely, PSMC_plots, Recomb_events, Repeat_correlation, Repeat_Distribution_in_AI, Repeat_length, Ts_Tv. What results these folders contain and what to look for in these, their details are given below.
 
-##########################################################################################################################################
-######################################################## OUTPUT OF COALREP MODULE ########################################################
-##########################################################################################################################################
-
-##########################          Guide for output of CoalRep        ##################################
+<h2> Guide for output of CoalRep </h2>
 
 The results directory will have 6 subdirectories: 1.PSMC_plots, 2.Recomb_events, 3.Repeat_correlation, 
 4.Repeat_Distribution_in_AI, 5.Repeat_length and 6.Ts_Tv.
@@ -144,11 +140,9 @@ Filename structure for masked/unmasked PSMC is followed like this:
 and for repeat class PSMC runs a single file RepLength_repclass.pdf will be produced.
 In total there should be 7 plots, 2 for each bin size and one for repeats.
 
-6. Ts_Tv directory:
+#6. Ts_Tv directory:#
 Heterozygosity and Ts/Tv ratio of corresponding atomic interval is calculated and plotted. 
 Distribution of heterozygosity is expected to increase across intervals in increasing order of atomic itervals but 
 corresponding Ts/Tv values should be randomly distributed.
 Filename structure is followed like this: {bamfile}.{prefix}.rep_tstv.{bin_size}.pdf
 There should be 3 plots in total one for each bin size.
-
-#########################################################################################################################
