@@ -140,7 +140,7 @@ Filename structure for masked/unmasked PSMC is followed like this:
 and for repeat class PSMC runs a single file RepLength_repclass.pdf will be produced.
 In total there should be 7 plots, 2 for each bin size and one for repeats.
 
-</h3>6. Ts_Tv directory:</h3>
+<h3>6. Ts_Tv directory:</h3>
 Heterozygosity and Ts/Tv ratio of corresponding atomic interval is calculated and plotted. 
 Distribution of heterozygosity is expected to increase across intervals in increasing order of atomic itervals but 
 corresponding Ts/Tv values should be randomly distributed.
