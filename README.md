@@ -52,3 +52,103 @@ Having created the read alignment file in bam format and the repeat location and
 <h2>Step 3: Performing Repeat Effect Analysis. </h2>
 
 <pre><code>coalrep -g GCF_000002775.4_Pop_tri_v3_genomic.fna -b pt/pt.sort.bam -p pt -n 24 -m GCF_000002775.4_Pop_tri_v3_rm.bed -t 5 -u 3.75e-08 -P "4+25*2+4+6"</code></pre>
+
+This will print on the screen some stuff like this 
+<pre><code>Approximate genome size is 439719174
+Now, calculating coverage
+The mean coverage of reads is 42.5397
+The variants will be called now
+[warning] samtools mpileup option `u` is functional, but deprecated. Please switch to using bcftools mpileup in future.
+[mpileup] 1 samples in 1 input files
+Note: none of --samples-file, --ploidy or --ploidy-file given, assuming all sites are diploid
+[warning] samtools mpileup option `u` is functional, but deprecated. Please switch to using bcftools mpileup in future.
+Note: none of --samples-file, --ploidy or --ploidy-file given, assuming all sites are diploid
+[mpileup] 1 samples in 1 input files
+Variants are ready
+Making PSMC fasta from variants
+Creating heterozygosity profile
+Now, running PSMC
+PSMC output is done
+Now, creating plotting information
+Now, running MSMC analysis
+[warning] samtools mpileup option `u` is functional, but deprecated. Please switch to using bcftools mpileup in future.
+Note: none of --samples-file, --ploidy or --ploidy-file given, assuming all sites are diploid
+[mpileup] 1 samples in 1 input files
+parsing position 135
+parsing position 10773
+parsing position 20773
+parsing position 30773
+parsing position 40773
+parsing position 50926
+parsing position 60926
+parsing position 70926
+parsing position 80926
+parsing position 90926
+</pre></code>
+This will go on for quite a long time as it will perform PSMC and MSMC analyses on your dataset and explore the repeat families and its effects on the demography.
+After run finishes you will see some lines like this.
+<pre><code>
+pdf 
+  2 
+Finished running Coalrep
+</pre></code>
+If you get this output at the end that means your run was successful and the results are produced and already kept in the results folder for your observation. In results folder there would be 6 folder namely, PSMC_plots, Recomb_events, Repeat_correlation, Repeat_Distribution_in_AI, Repeat_length, Ts_Tv. What results these folders contain and what to look for in these, their details are given below.
+
+##########################################################################################################################################
+######################################################## OUTPUT OF COALREP MODULE ########################################################
+##########################################################################################################################################
+
+##########################          Guide for output of CoalRep        ##################################
+
+The results directory will have 6 subdirectories: 1.PSMC_plots, 2.Recomb_events, 3.Repeat_correlation, 
+4.Repeat_Distribution_in_AI, 5.Repeat_length and 6.Ts_Tv.
+
+1. PSMC_plots directory:
+PSMC trajectories differ due to inclusion/exclusion of repeats. Extent of change in trajectories due to these repeats are
+assessed in these plots. PSMC plots showing repeat content across atomic intervals, and comparative msmc inferred curves.
+Filename strucure is followed like this: {bamfile}.{prefix}_repeat_effect_{bin_size}.pdf for masked/unmasked psmc runs and
+{bamfile}.{prefix}_repclass_PSMC_s100.pdf for all repeat class PSMC. 
+File ending with repclass_PSMC_s100.pdf will have PSMC plot having all the repeat classes plotted in single panel to get 
+comparative differences due to inclusion of each repeat class during PSMC analyses.
+There should be 5 plots, one for each bin sizes, one combined and one for repeat classes.
+
+2. Recomb_events directory:
+Occurance of sufficient number of recombinations in each atomic interval after 20th interval is one of the necessities 
+for accurate coalescent inferrence in PSMC. These plots will show if there are sufficient number of recombiantions for 
+your PSMC runs. 
+Plots for Number of recombinations in each interval across 25 iterations for each PSMC run. 
+Filename structure for masked and unmasked genomes PSMC runs is followed like this: 
+{bamfile}.{prefix}.{mask_status}.{bin_size}.nrcomb_RecQC.pdf.
+For repeat class PSMC runs filemname structure is followed like this: {repeat_class}.nrcomb_RecQC.pdf.
+There will be 6 plots for masked/unmasked PSMC runs and equal number of plots corresponding to repeat classes.
+
+3. Repeat_Correlation directory:
+Correlation for repeat content in atomic intervals with differences in Effective population sizes (Ne) is tested using 
+regression and Kendall's correlation test. If repeats are really affecting the PSMC inferrence, this correlation should 
+be high.
+Filename structure is followed like this: {bamfile}.{prefix}_correlation_repeat_{bin_size}.pdf.
+In total 4 plots should be there.
+
+4. Repeat_Distribution_in_AI directory:
+Contribution or abundance of repeat classes across intervals in each interval and across genome is shown to better
+assess which repeat classes have higher contribution to that atomic interval.
+Filename structure is followed like this: {bin_size}.AI_perc.pdf for abundance in each interval 
+and {bin_size}.AI_perc_geno.pdf for abundance across genome.
+In total there should be 6 plots, 2 for each bin size.
+
+5. Repeat_length directory:
+Lengths of sequences used for inference of Ne in each atomic interval varies. The distribution of lengths of sequences 
+across atomic intervals is plotted for each PSMC run. 
+Filename structure for masked/unmasked PSMC is followed like this: 
+{bamfile}.{prefix}.{mask_status}.{bin_size}.RepLength_{bin_size}.pdf
+and for repeat class PSMC runs a single file RepLength_repclass.pdf will be produced.
+In total there should be 7 plots, 2 for each bin size and one for repeats.
+
+6. Ts_Tv directory:
+Heterozygosity and Ts/Tv ratio of corresponding atomic interval is calculated and plotted. 
+Distribution of heterozygosity is expected to increase across intervals in increasing order of atomic itervals but 
+corresponding Ts/Tv values should be randomly distributed.
+Filename structure is followed like this: {bamfile}.{prefix}.rep_tstv.{bin_size}.pdf
+There should be 3 plots in total one for each bin size.
+
+#########################################################################################################################
