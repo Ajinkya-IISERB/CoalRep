@@ -1,6 +1,7 @@
 # CoalRep
-<h2> Evaluating the impact of repetitive elements on coalescent demographic inferences. </h2>
-
+<h2> Pipeline/Scripts for evaluating the impact of repetitive elements on coalescent demographic inferences. </h2>
+coalmap script will allow you to make indexed sorted .bam files. This script takes reference genome in .fasta format and fastq SRA paired end files as input.
+coalrep script will take input of sorted bam file along with repeat bed file and will output the concise plots of demographic inferences and effect of repeat classes on these inferences
 <h2> Third party tools required- </h2>
 You will need all these tools installed and available in the path.
 <pre><code> -BWA
