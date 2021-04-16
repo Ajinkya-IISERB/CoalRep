@@ -1,0 +1,57 @@
+hm_st <- read.table("NA12878.rm.ST.0.txt")
+un_st <- read.table("NA12878.un.ST.0.txt")
+hm_1000g <- read.table("NA12878.hm.1000g.0.txt")
+un_1000g <- read.table("NA12878.un.1000g.0.txt")
+ceu_smc_hm <- read.csv("smcpp_hm.csv")
+ceu_smc_un <- read.csv("smcpp_un.csv")
+ceu_hm <- read.table("ceu_rm_unfold.final.summary",header=T)
+ceu_un <- read.table("ceu_un_unfold.final.summary",header=T)
+
+
+pdf("Figure_2.pdf",height=12,width=22)
+par(mar = c(7, 6, 4, 4))
+plot(un_st$V1/1000,un_st$V2,ylim=c(0,3.3),log="x",type="n",lwd="3",xlab="",ylab="",axes=F,cex.main=1.75)
+
+rect(0.1,2.9,127,6, col=scales::alpha(rgb(col2rgb("cyan")[1,],col2rgb("cyan")[2,],col2rgb("cyan")[3,],max = 255), 0.25),border="transparent")
+text(127/2,3.1,"Holocene",cex=1.5,font=4)
+rect(128,2.9,2580,6, col=scales::alpha(rgb(col2rgb("yellow")[1,],col2rgb("yellow")[2,],col2rgb("yellow")[3,],max = 255), 0.25),border="transparent")
+text(2580/2,3.1,"Pleistocene",cex=1.5,font=4)
+rect(2580,2.9,5330,6, col=scales::alpha(rgb(col2rgb("green")[1,],col2rgb("green")[2,],col2rgb("green")[3,],max = 255), 0.25),border="transparent")
+text(3500,3.1,"Pliocene",cex=1.5,font=4,srt=90)
+abline(v=800,lwd=4,lty=3)
+text(2000,0.1,"Ancient Time Period",cex=1.5,font=4)
+abline(v=50,lwd=4,lty=3)
+text(250,0.1,"Mid-Time Period",cex=1.5,font=4)
+text(10,0.01,"Recent Time Period",cex=1.5,font=4)
+
+lines(un_st$V1/1000,un_st$V2,type="s",lwd="3",col="red")
+points(un_st$V1/1000,un_st$V2,pch=17,lwd="3",col="red",cex=2)
+lines(hm_st$V1/1000,hm_st$V2,type="s",lwd="3",col="blue")
+points(hm_st$V1/1000,hm_st$V2,pch=17,lwd="3",col="blue",cex=2)
+lines(un_1000g$V1/1000,un_1000g$V2,type="s",lwd="3",col="red")
+points(un_1000g$V1/1000,un_1000g$V2,pch=15,lwd="3",col="red",cex=2)
+lines(hm_1000g$V1/1000,hm_1000g$V2,type="s",lwd="3",col="blue")
+points(hm_1000g$V1/1000,hm_1000g$V2,pch=15,lwd="3",col="blue",cex=2)
+lines(ceu_smc_un$x/1000,ceu_smc_un$y/10000,type="s",lwd="3",col="red")
+points(ceu_smc_un$x/1000,ceu_smc_un$y/10000,pch=20,lwd="3",col="red",cex=2)
+lines(ceu_smc_hm$x/1000,ceu_smc_hm$y/10000,type="s",lwd="3",col="blue")
+points(ceu_smc_hm$x/1000,ceu_smc_hm$y/10000,pch=20,lwd="3",col="blue",cex=2)
+lines(ceu_un$year/1000,ceu_un$Ne_median/10000,type="s",lwd="3",col="red")
+lines(ceu_hm$year/1000,ceu_hm$Ne_median/10000,type="s",lwd="3",col="blue")
+
+
+axis(1, col="black",las=1,font=2,font.axis=4,cex.axis=1.75)
+mtext(side=1, line=3.2, "Time in past (KYA)", col="black", font=2,cex=1.75)
+axis(2, col="black",las=1,font=2,font.axis=4,cex.axis=1.75)
+mtext(side=2, line=3.2, expression(bold("Effective Population Size x 10"^4)),col="black", font=2,cex=1.75)
+box()
+legend(13,2.4, inset=0.1, legend=c("Unmasked","Masked"), fill=c("red","blue"),cex=1.5,text.font=2)
+legend(10,3, inset=0.1, legend=c("Samtools PSMC","1000g PSMC","1000g SMC++","1000g Stairway plot"),pch=c(17,15,20,NA),lwd=4,cex=1.5,text.font=2)
+
+
+#lines(ceu_un$year/1000,ceu_un$Ne_median/10000,type="s",lwd="3",col="red")
+#lines(ceu_hm$year/1000,ceu_hm$Ne_median/10000,type="s",lwd="3",col="blue")
+#legend(250,2.8, inset=0.13, legend=c("Stairway Plot Unmasked","Stairway Plot Masked"),fill=c("red","blue"),cex=1.5,text.font=2)
+
+
+dev.off()
