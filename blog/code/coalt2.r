@@ -12,7 +12,7 @@ t55_bs = list.files("../t55",pattern="RES1386-IW.rg.qf.s100.t55.combined.g22.*.t
 t45_bs = list.files("../t45",pattern="RES1386-IW.rg.qf.s100.t45.combined.g22.*.txt", full.names = TRUE)
 t35_bs = list.files("../t35",pattern="RES1386-IW.rg.qf.s100.t35.combined.g22.*.txt", full.names = TRUE)
 
-jpeg("COALT2_BS.jpeg",height=1000,width=1500)
+jpeg("plot1.jpeg",height=1000,width=1500)
 par(mar = c(8, 6, 4, 4))
 plot(t500$V1/1000,t500$V2,type="n",log="x",lwd=3,xaxt="n",yaxt="n",xlim=c(5,3500),ylim=c(0,12),xlab="",ylab="",axes=FALSE)
 
