@@ -12,7 +12,7 @@ call_ind <- read.table("../scaffold1281_iw_callable_status.bed")
 het_ind <- read.table("../ind_iw_hetcount_5k.bed")
 scaf <- "scaffold1281"
 for (i in scaf){
-jpeg(paste(i,"_int_dist.jpeg",sep=""),width=2500,height=1500)
+jpeg("COALT1.jpeg",width=2500,height=1500)
 par(mar=c(4,14,2.5,2.5))
 read.table(file="../RES1386-IW.rg.qf.s100.t500.dc",header=FALSE)->M
 M[M$V1==scaf,]-> Ms
