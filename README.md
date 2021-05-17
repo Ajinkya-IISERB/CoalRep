@@ -1,5 +1,6 @@
 <h3> The code and data from the manuscript:</h3>
-Patil, A.B., Vijay, N. Repetitive genomic regions and the inference of demographic history. Heredity (2021). https://doi.org/10.1038/s41437-021-00443-8
+Patil, A.B., Vijay, N. Repetitive genomic regions and the inference of demographic history. Heredity (2021). https://doi.org/10.1038/s41437-021-00443-8 .
+
 Please cite the article if you use the pipeline or dataset.
 
 # CoalRep
