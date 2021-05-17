@@ -1,3 +1,7 @@
+The code and data from the manuscript:
+Patil, A.B., Vijay, N. Repetitive genomic regions and the inference of demographic history. Heredity (2021). https://doi.org/10.1038/s41437-021-00443-8
+Please cite the article if you use the pipeline or dataset.
+
 # CoalRep
 ![alt text](https://github.com/Ajinkya-IISERB/CoalRep/blob/main/Figure_1.png)
 <h2> Pipeline/Scripts for evaluating the impact of repetitive elements on coalescent demographic inferences. </h2>
